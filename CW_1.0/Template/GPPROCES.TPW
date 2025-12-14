@@ -1,0 +1,351 @@
+#GROUP(%ProcessInitializeProcedure)
+#DECLARE(%ValidRangeKey)
+#DECLARE(%FileGroups),MULTI
+#FIX(%File,%Primary)
+#IF(%PrimaryKey)
+  #FIX(%Key,%PrimaryKey)
+  #IF(%RangeField)
+    #FOR(%KeyField)
+      #IF(UPPER(%KeyField)=UPPER(%RangeField))
+        #SET(%ValidRangeKey,%True)
+        #BREAK
+      #ENDIF
+    #ENDFOR
+    #IF(%ValidRangeKey=%Null)
+      #ERROR(%Procedure & ' Range Error: The range field is not in the primary key!')
+    #ENDIF
+    #CASE(%RangeLimitType)
+    #OF('Single Value')
+      #IF(NOT %RangeLimit)
+        #ERROR(%Procedure & ' Range Error: The limiting field could not be found!')
+      #ENDIF
+    #OF('Range of Values')
+      #IF(NOT %RangeLow)
+        #ERROR(%Procedure & ' Range Error: The low limiting field could not be found!')
+      #ENDIF
+      #IF(NOT %RangeHigh)
+        #ERROR(%Procedure & ' Range Error: The high limiting field could not be found!')
+      #ENDIF
+    #ENDCASE
+  #ENDIF
+#ENDIF
+#INSERT(%StandardVBXSearch)
+#!--------------------------------------------
+#GROUP(%ProcessDeclarations)
+#EMBED(%DeclarationSection,'Declaration Section')
+  #FOR(%LocalData)
+%[20]LocalData %LocalDataStatement
+  #ENDFOR
+  #IF(%PrimaryKey)
+    #FIX(%File,%Primary)
+    #FIX(%Key,%PrimaryKey)
+    #IF(%RangeField)
+      #FOR(%KeyField)
+        #IF(UPPER(%KeyField)=UPPER(%RangeField))
+          #IF(%RangeLimitType <> 'Current Value')
+            #BREAK
+          #ENDIF
+        #ENDIF
+        #FIX(%Field,%KeyField)                        #! Fix to component of key
+        #SET(%ValueConstruct,'SAV::' & %KeyField)
+        #IF(%FieldType = 'GROUP')                     #! IF component is a group
+%[20]ValueConstruct LIKE(%KeyField),PRE(SAV),AUTO #<! Save Range Limit Group
+        #ELSE                                         #! Else component NOT a group
+%[20]ValueConstruct LIKE(%KeyField),AUTO #<! Save Range Limit Field
+        #ENDIF                                        #! EndIf component is a group
+        #IF(UPPER(%KeyField)=UPPER(%RangeField))
+          #BREAK
+        #ENDIF
+      #ENDFOR
+    #ENDIF
+  #ENDIF
+!-----------------------------------------------------------------------------
+#GROUP(%ProcessEndOfProcedure)
+#IF(%EnableQuickScan)
+#EMBED(%BeforeTurnQuickScanOff,'Before Turning QuickScan Off'),WHERE(%EnableQuickScan)
+IF SEND(%Primary,'QUICKSCAN=off').
+#FOR(%Secondary),WHERE(%SecondaryType = '1:MANY')
+IF SEND(%Secondary,'QUICKSCAN=off').
+#ENDFOR
+#EMBED(%AfterTurnQuickScanOff,'After Turning QuickScan Off'),WHERE(%EnableQuickScan)
+#ENDIF
+#!---------------------------------------------------
+#GROUP(%ProcessSaveLimits),AUTO
+#DECLARE(%UpperComparison)
+#EMBED(%WindowEventOpenWindowBefore,'Window Event: Open Window, before setting up for reading')
+  #IF(%PrimaryKey)
+    #DECLARE(%LimitFound)
+    #FIX(%File,%Primary)
+    #FIX(%Key,%PrimaryKey)
+    #IF(%RangeField)
+      #FOR(%KeyField)
+        #IF(UPPER(%KeyField)=UPPER(%RangeField))
+          #IF(%RangeLimitType <> 'Current Value')
+            #BREAK
+          #ENDIF
+        #ENDIF
+SAV::%KeyField = %KeyField
+        #IF(UPPER(%KeyField)=UPPER(%RangeField))
+          #BREAK
+        #ENDIF
+      #ENDFOR
+      #SET(%LimitFound,%False)
+      #FOR(%KeyField)
+        #IF(%LimitFound)
+          #IF(%KeyFieldSequence='ASCENDING')
+CLEAR(%KeyField,-1)
+          #ELSE
+CLEAR(%KeyField,1)
+          #ENDIF
+        #ELSE
+          #FIX(%Field,%KeyField)                 #! Fix to component of key
+          #SET(%UpperComparison,%False)
+          #IF(%KeyNoCase)
+            #CASE(%FieldType)
+            #OF('STRING')
+            #OROF('CSTRING')
+            #OROF('PSTRING')
+            #OROF('GROUP')
+              #SET(%UpperComparison,%True)
+            #ENDCASE
+          #ENDIF
+          #IF(%KeyField=%RangeField)
+            #CASE(%RangeLimitType)
+            #OF('Current Value')
+              #IF(%UpperComparison)
+%KeyField = LOWER(SAV::%KeyField)
+              #ELSE
+%KeyField = SAV::%KeyField
+              #ENDIF
+            #OF('Single Value')
+              #IF(%UpperComparison)
+%KeyField = LOWER(%RangeLimit)
+              #ELSE
+%KeyField = %RangeLimit
+              #ENDIF
+            #OF('Range of Values')
+              #IF(%UpperComparison)
+%KeyField = LOWER(%RangeLow)
+              #ELSE
+%KeyField = %RangeLow
+              #ENDIF
+            #ENDCASE
+            #SET(%LimitFound,%True)
+          #ELSE
+            #IF(%UpperComparison)
+%KeyField = LOWER(SAV::%KeyField)
+            #ELSE
+%KeyField = SAV::%KeyField
+            #ENDIF
+          #ENDIF
+        #ENDIF
+      #ENDFOR
+#EMBED(%BeforeKeySet,'Before SET() issued')
+SET(%Primarykey,%PrimaryKey)
+    #ELSE
+#EMBED(%BeforeKeySet,'Before SET() issued')
+SET(%PrimaryKey)
+    #ENDIF
+  #ELSE
+#EMBED(%BeforeKeySet,'Before SET() issued')
+SET(%Primary)
+  #ENDIF
+#EMBED(%BeforeInitialGet,'Before first record retrieval')
+LOOP
+  DO GetNext%Primary
+  DO ValidateRecord
+  EXECUTE RecordStatus
+    BEGIN
+      LocalResponse = RequestCancelled
+      BREAK
+    END
+    CYCLE
+  END
+  BREAK
+END
+IF LocalResponse = RequestCancelled
+  POST(Event:CloseWindow)
+  CYCLE
+END
+#EMBED(%AfterInitialGet,'After first record retrieval')
+#EMBED(%WindowEventOpenWindowAfter,'Window Event: Open Window, after setting up for read')
+#!---------------------------------------------------
+#GROUP(%ProcessGetRecords)
+GetNext%Primary ROUTINE
+  #ADD(%FileGroups,%Primary)
+  #INSERT(%ProcessGetNextRecord,%Primary)
+  #FOR(%Secondary)
+    #FIX(%File,%SecondaryTo)
+    #FIX(%Relation,%Secondary)
+    #IF(%FileRelationType = '1:MANY')
+      #ADD(%FileGroups,%Relation)
+GetNext%Relation ROUTINE
+  #INSERT(%ProcessGetNextRecord,%Secondary)
+    #ENDIF
+  #ENDFOR
+
+GetNextRecord ROUTINE
+  #FOR(%FileGroups),REVERSE
+  DO GetNext%FileGroups
+  IF LocalResponse = RequestCompleted THEN EXIT.
+  #ENDFOR
+#!---------------------------------------------------
+#GROUP(%ProcessGetNextRecord,%CurrentFile)
+LocalResponse = RequestCancelled
+LOOP
+  NEXT(%CurrentFile)
+  IF ERRORCODE() THEN EXIT.
+  #IF(%CurrentFile = %Primary)
+    #IF(%PrimaryKey)
+  RecordsProcessed += 1
+  RecordsThisCycle += 1
+    #ELSE
+  RecordsProcessed += BYTES(%Primary)
+  RecordsThisCycle += BYTES(%Primary)
+    #ENDIF
+  IF PercentProgress < 100
+    PercentProgress = (RecordsProcessed / RecordsToProcess)*100
+    IF PercentProgress > 100
+      PercentProgress = 100
+    END
+    ?Progress:Thermometer{Prop:Width} = ROUND(PercentProgress,0)
+    ?Progress:PctText{Prop:Text} = FORMAT(PercentProgress,@N5.1) & '% Completed'
+    DISPLAY()
+  END
+  #ENDIF
+  #IF(%CurrentFile <> %Primary)
+    #FOR(%Secondary),WHERE(%Secondary = %CurrentFile)
+      #FIX(%File,%Secondary)
+      #FIX(%Relation,%SecondaryTo)
+      #IF(%FileRelationType = 'MANY:1')
+        #FOR(%FileKeyField)
+  IF %FileKeyField <> %FileKeyFieldLink THEN EXIT.
+        #ENDFOR
+      #ENDIF
+      #BREAK
+    #ENDFOR
+  #ENDIF
+  #FOR(%Secondary),WHERE(%SecondaryTo = %CurrentFile)
+    #FIX(%File,%Secondary)
+    #FIX(%Relation,%CurrentFile)
+    #FIX(%Key,%FileKey)
+    #IF(%FileRelationType = 'MANY:1')
+      #FOR(%RelationKeyField)
+        #IF(%RelationKeyField)
+  %RelationKeyFieldLink = %RelationKeyField
+        #ELSE
+          #FOR(%KeyField),WHERE(%KeyField = %RelationKeyFieldLink)
+            #IF(%KeyFieldSequence = 'ASCENDING')
+  CLEAR(%RelationKeyFieldLink,-1)
+            #ELSE
+  CLEAR(%RelationKeyFieldLink,1)
+            #ENDIF
+          #ENDFOR
+        #ENDIF
+      #ENDFOR
+  SET(%FileKey,%FileKey)
+  DO GetNext%File
+  IF LocalResponse = RequestCancelled THEN CYCLE.
+    #ENDIF
+    #BREAK
+  #ENDFOR
+  BREAK
+END
+LocalResponse = RequestCompleted
+EXIT
+#!---------------------------
+#GROUP(%ProcessValidateRecord)
+#DECLARE(%UpperComparison)
+!-----------------------------------------------------------------------------
+ValidateRecord       ROUTINE
+  RecordStatus = Record:OutOfRange
+  IF LocalResponse = RequestCancelled THEN EXIT.
+  #SUSPEND
+  #?RejectRecord = False
+  #INSERT(%StandardFormula,'Before Range Check')
+  #?IF RejectRecord THEN EXIT.
+  #RESUME
+  IF ERRORCODE() THEN EXIT.
+  #IF(%RangeField AND %PrimaryKey)
+    #FIX(%File,%Primary)
+    #FIX(%Key,%PrimaryKey)
+    #FOR(%KeyField)
+      #FIX(%Field,%KeyField)
+      #SET(%UpperComparison,%False)
+      #IF(%KeyNoCase)
+        #CASE(%FieldType)
+        #OF('STRING')
+        #OROF('CSTRING')
+        #OROF('PSTRING')
+        #OROF('GROUP')
+          #SET(%UpperComparison,%True)
+        #ENDCASE
+      #ENDIF
+      #IF(%KeyField=%RangeField)
+        #IF(%UpperComparison)
+          #CASE(%RangeLimitType)
+          #OF('Current Value')
+  IF UPPER(%KeyField) <> UPPER(SAV::%KeyField) THEN EXIT.
+          #OF('Single Value')
+  IF UPPER(%KeyField) <> UPPER(%RangeLimit) THEN EXIT.
+          #OF('Range of Values')
+  IF UPPER(%KeyField) < UPPER(%RangeLow) THEN EXIT.
+  IF UPPER(%KeyField) > UPPER(%RangeHigh) THEN EXIT.
+          #ENDCASE
+        #ELSE
+          #CASE(%RangeLimitType)
+          #OF('Current Value')
+  IF %KeyField <> SAV::%KeyField THEN EXIT.
+          #OF('Single Value')
+  IF %KeyField <> %RangeLimit THEN EXIT.
+          #OF('Range of Values')
+  IF %KeyField < %RangeLow THEN EXIT.
+  IF %KeyField > %RangeHigh THEN EXIT.
+          #ENDCASE
+        #ENDIF
+        #BREAK
+      #ELSE
+        #IF(%UpperComparison)
+  IF UPPER(%KeyField) <> UPPER(SAV::%KeyField) THEN EXIT.
+        #ELSE
+  IF %KeyField <> SAV::%KeyField THEN EXIT.
+        #ENDIF
+      #ENDIF
+    #ENDFOR
+  #ENDIF
+  #EMBED(%RecordOutOfRange,'Validate Record: Range Checking')
+  #SUSPEND
+  #?RecordStatus = Record:Filtered
+    #SUSPEND
+  #?RejectRecord = False
+  #INSERT(%StandardFormula,'Before Filter Check')
+  #?IF RejectRecord THEN EXIT.
+    #RESUME
+    #IF(%RecordFilter)
+  IF ~(%RecordFilter)
+    EXIT
+  END
+    #ENDIF
+    #EMBED(%RecordFilter,'Validate Record: Filter Checking')
+  #RESUME
+  RecordStatus = Record:OK
+  EXIT
+#!---------------------------
+#GROUP(%ProcessEventTimer)
+#INSERT(%StandardFormula,'Before Lookups')
+#INSERT(%StandardSecondaryLookups)
+#INSERT(%StandardFormula,'After Lookups')
+#EMBED(%ProcessActivity,'Activity for each record')
+#CASE(%ProcessAction)
+#OF('PUT record')
+PUT(%Primary)
+IF ERRORCODE()
+  IF StandardWarning(Warn:ProcessActionError,'Put','%Primary')
+    LocalResponse = RequestCompleted
+    BREAK
+  END
+END
+#OF('DELETE record')
+DELETE(%Primary)
+#ENDCASE
+#EMBED(%ProcessError,'Error checking after record Action')

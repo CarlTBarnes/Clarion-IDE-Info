@@ -1,0 +1,385 @@
+#!----------------------------------------------------------------
+#CONTROL(BrowseSelectButton,'Select record from a Browse Box'),DESCRIPTION('Select a Record from Browse on ' & %Primary),REQ(BrowseBox),FIRST,HLP('~TPLControlBrowseSelectButton')
+  CONTROLS
+    BUTTON('&Select'),USE(?Select)
+  END
+#BOXED('Select Button')
+  #PROMPT('Hide the Select button when not applicable',CHECK),%HideIfDisabled,AT(10,,150)
+#ENDBOXED
+#ATSTART
+  #DECLARE(%SelectControl)
+  #FOR(%Control),WHERE(%ControlInstance = %ActiveTemplateInstance)
+    #SET(%SelectControl,%Control)
+  #ENDFOR
+#ENDAT
+#AT(%BrowseBoxDoubleClick)
+  #IF(%SelectControl)
+    #IF(%Control=%ListControl)
+IF LocalRequest = SelectRecord
+  POST(Event:Accepted,%SelectControl)
+  EXIT
+END
+    #ENDIF
+  #ENDIF
+#ENDAT
+#AT(%BeforeAccept)
+  #IF(%SelectControl)
+IF LocalRequest = SelectRecord
+    #IF(%HideIfDisabled)
+  %SelectControl{Prop:Hide} = False
+    #ENDIF
+  ENABLE(%SelectControl)
+  %SelectControl{Prop:Default} = True
+ELSE
+    #IF(%HideIfDisabled)
+  %SelectControl{Prop:Hide} = True
+    #ENDIF
+  DISABLE(%SelectControl)
+END
+  #ENDIF
+#ENDAT
+#AT(%ControlEventHandling,%SelectControl,'Accepted')
+  #IF(%SelectControl)
+#EMBED(%BrowseBoxProcessSelected,'Browse Box, process selected record')
+LocalResponse = RequestCompleted
+POST(Event:CloseWindow)
+  #ENDIF
+#ENDAT
+#!----------------------------------------------------------------
+#CONTROL(BrowseUpdateButtons,'Update records from a Browse Box'),DESCRIPTION('Update a Record from Browse Box on ' & %Primary),REQ(BrowseBox),HLP('~TPLControlBrowseUpdateButtons')
+  CONTROLS
+       BUTTON('&Insert'),AT(,,42,12),USE(?Insert)
+       BUTTON('&Change'),AT(42,0,42,12),USE(?Change)
+       BUTTON('&Delete'),AT(42,0,42,12),USE(?Delete)
+  END
+#BOXED('Update Buttons')
+  #PROMPT('&Update Procedure',PROCEDURE),%UpdateProcedure
+#ENDBOXED
+#ATSTART
+  #DECLARE(%InsertControl)
+  #DECLARE(%ChangeControl)
+  #DECLARE(%DeleteControl)
+  #FOR(%Control),WHERE(%ControlInstance = %ActiveTemplateInstance)
+    #CASE(%ControlOriginal)
+    #OF('?Insert')
+      #SET(%InsertControl,%Control)
+    #OF('?Change')
+      #SET(%ChangeControl,%Control)
+    #OF('?Delete')
+      #SET(%DeleteControl,%Control)
+    #ENDCASE
+  #ENDFOR
+#ENDAT
+#AT(%BeforeAccept)
+  #IF(%InsertControl)
+%ListControl{Prop:Alrt,255} = InsertKey
+  #ENDIF
+  #IF(%DeleteControl)
+%ListControl{Prop:Alrt,254} = DeleteKey
+  #ENDIF
+  #IF(%ChangeControl)
+%ListControl{Prop:Alrt,253} = CtrlEnter
+  #ENDIF
+#ENDAT
+#AT(%BrowseBoxDoubleClick)
+  #IF(%Control=%ListControl)
+    #IF(%ChangeControl)
+POST(Event:Accepted,%ChangeControl)
+DO %InstancePrefix:FillBuffer
+    #ENDIF
+  #ENDIF
+#ENDAT
+#AT(%ControlEventHandling,%InsertControl,'Accepted')
+DO %InstancePrefix:ButtonInsert
+#ENDAT
+#AT(%ControlEventHandling,%ChangeControl,'Accepted')
+DO %InstancePrefix:ButtonChange
+#ENDAT
+#AT(%ControlEventHandling,%DeleteControl,'Accepted')
+DO %InstancePrefix:ButtonDelete
+#ENDAT
+#AT(%BrowseBoxKeyHandling)
+  #IF(%Control=%ListControl)
+    #IF(%InsertControl)
+OF InsertKey
+  POST(Event:Accepted,%InsertControl)
+    #ENDIF
+    #IF(%DeleteControl)
+OF DeleteKey
+  POST(Event:Accepted,%DeleteControl)
+    #ENDIF
+    #IF(%ChangeControl)
+OF CtrlEnter
+  POST(Event:Accepted,%ChangeControl)
+    #ENDIF
+  #ENDIF
+#ENDAT
+#AT(%BrowseBoxEmpty)
+  #IF(%Control = %ListControl)
+    #IF(%ChangeControl)
+%ChangeControl{Prop:Disable} = 1
+    #ENDIF
+    #IF(%DeleteControl)
+%DeleteControl{Prop:Disable} = 1
+    #ENDIF
+  #ENDIF
+#ENDAT
+#AT(%BrowseBoxNotEmpty)
+  #IF(%Control = %ListControl)
+    #IF(%ChangeControl)
+%ChangeControl{Prop:Disable} = 0
+    #ENDIF
+    #IF(%DeleteControl)
+%DeleteControl{Prop:Disable} = 0
+    #ENDIF
+  #ENDIF
+#ENDAT
+#AT(%ProcedureRoutines)
+  #IF(%InsertControl)
+!----------------------------------------------------------------
+%InstancePrefix:ButtonInsert ROUTINE
+  GET(%Primary,0)
+    #FIX(%File,%Primary)
+  CLEAR(%FilePrefix:Record,0)
+    #FOR(%Field),WHERE(%FieldType='MEMO')
+  CLEAR(%Field)
+    #ENDFOR
+  #INSERT(%BrowseBoxLimitCode,'Clear')
+  LocalRequest = InsertRecord
+  #EMBED(%BrowseBeforeInsert,'Browse Box, Before Insert'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  DO %InstancePrefix:CallUpdate
+  #EMBED(%BrowseAfterInsert,'Browse Box, After Insert'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  IF LocalResponse = RequestCompleted
+    DO %InstancePrefix:ValidateRecord
+    IF %InstancePrefix:RecordStatus = Record:OK
+  #IF(ITEMS(%BrowseTotals))
+    DO %InstancePrefix:FillQueue
+    #FOR(%BrowseTotals)
+      #IF(%BrowseTotalCondition)
+      IF (%BrowseTotalCondition)
+        #CASE(%BrowseTotalType)
+        #OF('Count')
+        %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+        #OF('Sum')
+        %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+        #OF('Average')
+        %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+        %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+        #ENDCASE
+      END
+      #ELSE
+        #CASE(%BrowseTotalType)
+        #OF('Count')
+      %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+        #OF('Sum')
+      %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+        #OF('Average')
+      %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+      %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+        #ENDCASE
+      #ENDIF
+    #ENDFOR
+  #ENDIF
+      DO %InstancePrefix:LocateRecord
+    END
+  END
+  #FOR(%BrowseTotals)
+    #CASE(%BrowseTotalType)
+    #OF('Count')
+    %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Cnt:Value
+    #OF('Sum')
+    %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Sum:Value
+    #OF('Average')
+    %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Sum:Value/%InstancePrefix:%BrowseTotalTarget:Cnt:Value
+    #ENDCASE
+  #ENDFOR
+  LocalRequest = OriginalRequest
+  SELECT(%ListControl)
+  ForceRefresh = True
+  DO RefreshWindow
+  #ENDIF
+  #IF(%ChangeControl)
+!----------------------------------------------------------------
+%InstancePrefix:ButtonChange ROUTINE
+  LocalRequest = ChangeRecord
+  #FOR(%BrowseTotals)
+    #IF(%BrowseTotalCondition)
+  IF (%BrowseTotalCondition)
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 1
+  ELSE
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 0
+      #OF('Sum')
+    %InstancePrefix:%BrowseTotalTarget:Sum:Temp = %BrowseTotalField
+  ELSE
+    %InstancePrefix:%BrowseTotalTarget:Sum:Temp = 0
+      #OF('Average')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 1
+    %InstancePrefix:%BrowseTotalTarget:Sum:Temp = %BrowseTotalField
+  ELSE
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 0
+    %InstancePrefix:%BrowseTotalTarget:Sum:Temp = 0
+      #ENDCASE
+  END
+    #ELSE
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+  %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 1
+      #OF('Sum')
+  %InstancePrefix:%BrowseTotalTarget:Sum:Temp = %BrowseTotalField
+      #OF('Average')
+  %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 1
+  %InstancePrefix:%BrowseTotalTarget:Sum:Temp = %BrowseTotalField
+      #ENDCASE
+    #ENDIF
+  #ENDFOR
+  #EMBED(%BrowseBeforeChange,'Browse Box, Before Change'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  DO %InstancePrefix:CallUpdate
+  #EMBED(%BrowseAfterChange,'Browse Box, After Change'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  IF LocalResponse = RequestCompleted
+  #IF(ITEMS(%BrowseTotals))
+    DO %InstancePrefix:FillQueue
+    #FOR(%BrowseTotals)
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Value -= %InstancePrefix:%BrowseTotalTarget:Cnt:Temp
+      #OF('Sum')
+    %InstancePrefix:%BrowseTotalTarget:Sum:Value -= %InstancePrefix:%BrowseTotalTarget:Sum:Temp
+      #OF('Average')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Value -= %InstancePrefix:%BrowseTotalTarget:Cnt:Temp
+    %InstancePrefix:%BrowseTotalTarget:Sum:Value -= %InstancePrefix:%BrowseTotalTarget:Sum:Temp
+      #ENDCASE
+    #ENDFOR
+  #ENDIF
+    DO %InstancePrefix:ValidateRecord
+    IF %InstancePrefix:RecordStatus = Record:OK
+  #FOR(%BrowseTotals)
+    #IF(%BrowseTotalCondition)
+      IF (%BrowseTotalCondition)
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+        %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+      #OF('Sum')
+        %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+      #OF('Average')
+        %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+        %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+      #ENDCASE
+      END
+    #ELSE
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+      %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+      #OF('Sum')
+      %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+      #OF('Average')
+      %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+      %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+      #ENDCASE
+    #ENDIF
+  #ENDFOR
+      IF %InstancePrefix:Position = POSITION(%PrimaryKey)
+        DO %InstancePrefix:RefreshPage
+      ELSE
+        DO %InstancePrefix:LocateRecord
+      END
+    ELSE
+      SELECT(%ListControl,CHOICE(%ListControl))
+    END
+  END
+  #FOR(%BrowseTotals)
+    #CASE(%BrowseTotalType)
+    #OF('Count')
+  %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Cnt:Value
+    #OF('Sum')
+  %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Sum:Value
+    #OF('Average')
+  %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Sum:Value/%InstancePrefix:%BrowseTotalTarget:Cnt:Value
+    #ENDCASE
+  #ENDFOR
+  LocalRequest = OriginalRequest
+  SELECT(%ListControl)
+  ForceRefresh = True
+  DO RefreshWindow
+  #ENDIF
+  #IF(%DeleteControl)
+!----------------------------------------------------------------
+%InstancePrefix:ButtonDelete ROUTINE
+  LocalRequest = DeleteRecord
+  #FOR(%BrowseTotals)
+    #IF(%BrowseTotalCondition)
+  IF (%BrowseTotalCondition)
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 1
+  ELSE
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 0
+      #OF('Sum')
+    %InstancePrefix:%BrowseTotalTarget:Sum:Temp = %BrowseTotalField
+  ELSE
+    %InstancePrefix:%BrowseTotalTarget:Sum:Temp = 0
+      #OF('Average')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 1
+    %InstancePrefix:%BrowseTotalTarget:Sum:Temp = %BrowseTotalField
+  ELSE
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 0
+    %InstancePrefix:%BrowseTotalTarget:Sum:Temp = 0
+      #ENDCASE
+  END
+    #ELSE
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+  %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 1
+      #OF('Sum')
+  %InstancePrefix:%BrowseTotalTarget:Sum:Temp = %BrowseTotalField
+      #OF('Average')
+  %InstancePrefix:%BrowseTotalTarget:Cnt:Temp = 1
+  %InstancePrefix:%BrowseTotalTarget:Sum:Temp = %BrowseTotalField
+      #ENDCASE
+    #ENDIF
+  #ENDFOR
+  #EMBED(%BrowseBeforeDelete,'Browse Box, Before Delete'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  DO %InstancePrefix:CallUpdate
+  #EMBED(%BrowseAfterDelete,'Browse Box, After Delete'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  IF LocalResponse = RequestCompleted
+  #IF(ITEMS(%BrowseTotals))
+    DO %InstancePrefix:FillQueue
+    #FOR(%BrowseTotals)
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Value -= %InstancePrefix:%BrowseTotalTarget:Cnt:Temp
+      #OF('Sum')
+    %InstancePrefix:%BrowseTotalTarget:Sum:Value -= %InstancePrefix:%BrowseTotalTarget:Sum:Temp
+      #OF('Average')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Value -= %InstancePrefix:%BrowseTotalTarget:Cnt:Temp
+    %InstancePrefix:%BrowseTotalTarget:Sum:Value -= %InstancePrefix:%BrowseTotalTarget:Sum:Temp
+      #ENDCASE
+    #ENDFOR
+  #ENDIF
+  #FOR(%BrowseTotals)
+    #CASE(%BrowseTotalType)
+    #OF('Count')
+    %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Cnt:Value
+    #OF('Sum')
+    %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Sum:Value
+    #OF('Average')
+    %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Sum:Value/%InstancePrefix:%BrowseTotalTarget:Cnt:Value
+    #ENDCASE
+  #ENDFOR
+    DELETE(%ListQueue)
+    DO %InstancePrefix:RefreshPage
+  END
+  LocalRequest = OriginalRequest
+  SELECT(%ListControl)
+  ForceRefresh = True
+  DO RefreshWindow
+  #ENDIF
+!----------------------------------------------------------------
+%InstancePrefix:CallUpdate ROUTINE
+  #EMBED(%BrowseBoxBeforeUpdate,'Browse Box, before calling the update procedure')                                                               ,%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  GlobalRequest = LocalRequest
+  %UpdateProcedure
+  LocalResponse = GlobalResponse
+  #EMBED(%BrowseBoxAfterUpdate,'Browse Box, returning from the update procedure')                                                               ,%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+#ENDAT

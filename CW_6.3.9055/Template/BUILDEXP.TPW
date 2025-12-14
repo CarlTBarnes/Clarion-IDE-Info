@@ -1,0 +1,113 @@
+#GROUP(%ConstructExportFile)
+#MESSAGE('Generating Module:    ' & %Application & '.EXP', 1) #! Post generation message
+#MESSAGE('Generating Export File', 2) #! Post generation message
+#MESSAGE('',3)
+#SET(%ExportFile,%Application & '.exp')
+#CREATE(%BuildFile)
+#IF(%UseDefaultXPManifest)
+MANIFEST
+#ENDIF
+#EMBED(%AfterCreatingExportFile,'Creating the export file')
+#!
+#IF(%ProgramExtension='EXE')
+NAME '%(UPPER(SUB(%ProjectTarget,1,INSTRING('.',%ProjectTarget)-1)))' GUI
+#ELSE
+LIBRARY '%(UPPER(SUB(%ProjectTarget,1,INSTRING('.',%ProjectTarget)-1)))' GUI
+#ENDIF
+#!
+#IF(%ProgramExtension='DLL')
+#IF(%Target32 AND %RBDImageBase>'')
+#INSERT(%RebaseCode)
+#ENDIF
+#EMBED(%BeforeExportList,'Before the export list')
+EXPORTS
+  #EMBED(%BeginningExports,'Top of export list')
+  #FOR(%Procedure)
+    #IF(%ProcedureExported)
+  %(LINKNAME(%Procedure & %Prototype)) @?
+    #ENDIF
+  #ENDFOR
+  #FOR(%File)
+    #IF(%DefaultGenerate)
+    #ELSIF(%OverrideGenerate)
+    #ELSE
+      #FIX(%UsedFile,%File)
+      #IF(NOT %UsedFile)
+        #CYCLE
+      #ENDIF
+    #ENDIF
+    #IF(%OverrideExternal='Not External')
+      #IF(%OverrideExport)
+  $%File @?
+        #FOR(%Key)
+  %File$%Key @?
+        #ENDFOR
+        #FOR(%Field),WHERE(%FieldType = 'MEMO')
+  %File$%Field @?
+        #ENDFOR
+        #FOR(%Field),WHERE(%FieldType = 'BLOB')
+  %File$%Field @?
+        #ENDFOR
+  %File$%FilePrefix:RECORD @?
+  %File$TYPE$%FilePrefix:RECORD @?
+  $%File::Used @?
+      #ENDIF
+    #ELSIF((NOT %OverrideExternal) OR %OverrideExternal = 'Use Default')
+      #IF(%DefaultExport)
+  $%File @?
+        #FOR(%Key)
+  %File$%Key @?
+        #ENDFOR
+        #FOR(%Field),WHERE(%FieldType = 'MEMO')
+  %File$%Field @?
+        #ENDFOR
+  %File$%FilePrefix:RECORD @?
+  %File$TYPE$%FilePrefix:RECORD @?
+  $%File::Used @?
+      #ENDIF
+    #ENDIF
+  #ENDFOR
+  #IF(NOT %GlobalExternal)
+  $GlobalRequest @?
+  $GlobalResponse @?
+  $VCRRequest @?
+    #SET(%ValueConstruct,1)
+    #FOR(%GlobalData)
+      #IF(NOT EXTRACT(%GlobalDataStatement,'EXTERNAL'))
+        #IF(%ValueConstruct = 1)
+          #IF(EXTRACT(%GlobalDataStatement,'GROUP'))
+            #SET(%ValueConstruct,%ValueConstruct + 1)
+              #IF(NOT EXTRACT(%GlobalDataStatement,'OVER'))
+  TYPE$%GlobalData @?
+  $%GlobalData @?
+              #ENDIF
+          #ELSIF(EXTRACT(%GlobalDataStatement,'QUEUE'))
+            #SET(%ValueConstruct,%ValueConstruct + 1)
+              #IF(NOT EXTRACT(%GlobalDataStatement,'OVER'))
+  TYPE$%GlobalData @?
+  TCB$%GlobalData @?
+  $%GlobalData @?
+              #ENDIF
+          #ELSE
+            #IF(NOT EXTRACT(%GlobalDataStatement,'OVER') AND NOT EXTRACT(%GlobalDataStatement,'TYPE') AND NOT EXTRACT(%GlobalDataStatement,'END'))
+  $%GlobalData @?
+            #ENDIF
+          #ENDIF
+        #ELSE
+          #IF(EXTRACT(%GlobalDataStatement,'GROUP'))
+            #SET(%ValueConstruct,%ValueConstruct + 1)
+          #ELSIF(EXTRACT(%GlobalDataStatement,'QUEUE'))
+            #SET(%ValueConstruct,%ValueConstruct + 1)
+          #ELSIF(NOT %GlobalData)
+            #SET(%ValueConstruct,%ValueConstruct - 1)
+          #ENDIF
+        #ENDIF
+      #ENDIF
+    #ENDFOR
+  #ENDIF
+#ENDIF
+#EMBED(%DLLExportList,'Inside the export list')
+#EMBED(%BeforeClosingExports,'Closing the export file')
+#CLOSE(%BuildFile)
+#REPLACE(%ExportFile,%BuildFile)
+#EMBED(%AfterClosingExports,'After Closing the export file')

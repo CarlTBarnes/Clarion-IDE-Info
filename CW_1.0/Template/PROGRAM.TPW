@@ -1,0 +1,1054 @@
+#PROGRAM(CLARION,'Default Program'),HLP('~TPLProgram')
+ PROGRAM
+#!
+#! Generate MAP
+#!
+#DECLARE(%ClipName)
+#DECLARE(%RIDelFileName)
+#DECLARE(%RIUpdFileName)
+#DECLARE(%SFFileName)                            #! Standard Functions
+#SET(%ClipName,SUB(%Application,1,5))
+#SET(%RIDelFileName,%ClipName & '_RD.CLW')
+#SET(%RIUpdFileName,%ClipName & '_RU.CLW')
+#SET(%SFFileName,%ClipName & '_SF.CLW')
+#PROJECT(%RIDelFileName)                            #! Referential Integrity
+#PROJECT(%RIUpdFileName)                            #! Referential Integrity
+#PROJECT(%SFFileName)                            #! Standard Functions
+#MESSAGE('Generating RI Lists',3)
+#INSERT(%RIGather)
+#MESSAGE('Generating MAP',3)
+   MAP
+#FIX(%Module,%Program)
+#FOR(%ModuleProcedure)
+  #FIX(%Procedure,%ModuleProcedure)
+     %Procedure %Prototype
+#ENDFOR
+#IF(%ModuleInclude)
+     INCLUDE('%ModuleInclude')
+#ENDIF
+#MESSAGE('Declaring Generated Procedures',3)
+#FOR(%Module), WHERE (%Module <> %Program)
+     MODULE('%Module')
+  #IF(%ModuleExternal)
+    #IF(%ModuleInclude)
+       INCLUDE('%ModuleInclude')
+    #ELSE
+      #FOR(%ModuleProcedure)
+        #FIX(%Procedure,%ModuleProcedure)
+       %Procedure %Prototype
+      #ENDFOR
+    #ENDIF
+  #ELSE
+    #FOR(%ModuleProcedure)
+      #FIX(%Procedure,%ModuleProcedure)
+     %Procedure %Prototype
+    #ENDFOR
+  #ENDIF
+     END
+#ENDFOR
+#MESSAGE('Declaring Standard Functions',3)
+     MODULE('%SFFileName')
+       CheckOpen(FILE,<BYTE>,<BYTE>)
+#IF(%PrintPreviewUsed)
+       ReportPreview(QUEUE)
+#ENDIF
+       StandardWarning(LONG,<STRING>,<STRING>,<STRING>,<STRING>),LONG
+#IF(%INIActive)
+       INIRestoreWindow(STRING,STRING)
+       INISaveWindow(STRING,STRING)
+#ENDIF
+     END
+#MESSAGE('Declaring RI Procedures',3)
+     MODULE('%RIUpdFileName')
+       #INSERT(%RIDeclare,'UPDATE')
+     END
+     MODULE('%RIDelFileName')
+       #INSERT(%RIDeclare,'DELETE')
+     END
+     #EMBED(%GlobalMap,'Inside the Global Map')
+   END
+
+   INCLUDE('Equates.CLW')
+   INCLUDE('Keycodes.CLW')
+   INCLUDE('Errors.CLW')
+
+Sort:Alpha    STRING('  AFANAT'|
+                    &'B BFBNBT'|
+                    &'C CFCNCT'|
+                    &'D DFDNDT'|
+                    &'E EFENET'|
+                    &'F FFFNFT'|
+                    &'G GFGNGT'|
+                    &'H HFHNHT'|
+                    &'I IFINIT'|
+                    &'J JFJNJT'|
+                    &'K KFKNKT'|
+                    &'L LFLNLT'|
+                    &'M MFMNMT'|
+                    &'N NFNNNT'|
+                    &'O OFONOT'|
+                    &'P PFPNPT'|
+                    &'Q QN'|
+                    &'R RFRNRT'|
+                    &'S SFSNST'|
+                    &'T TFTNTT'|
+                    &'U UFUNUT'|
+                    &'V VFVNVT'|
+                    &'W WFWNWT'|
+                    &'X XFXNXT'|
+                    &'Y YFYNYT'|
+                    &'Z ZN')
+Sort:Alpha:Array    STRING(2),DIM(100),OVER(Sort:Alpha)
+
+Sort:Name     STRING('   ALBAMEARNBAK'|
+                    &'BATBENBIABOBBRA'|
+                    &'BROBUACACCARCEN'|
+                    &'CHRCOECONCORCRU'|
+                    &'DASDELDIADONDUR'|
+                    &'ELDEVEFELFISFLO'|
+                    &'FREFUTGARGIBGOL'|
+                    &'GOSGREGUTHAMHEM'|
+                    &'HOBHOTINGJASJON'|
+                    &'KAGKEAKIRKORKYO'|
+                    &'LATLEOLIGLOUMAC'|
+                    &'MAQMARMAUMCKMER'|
+                    &'MILMONMORNATNOL'|
+                    &'OKEPAGPAUPETPIN'|
+                    &'PORPULRAUREYROB'|
+                    &'ROSRUBSALSCASCH'|
+                    &'SCRSHASIGSKISNA'|
+                    &'SOUSTESTISUNTAY'|
+                    &'TIRTUCVANWACWAS'|
+                    &'WEIWIEWIMWOLYOR')
+Sort:Name:Array     STRING(3),DIM(100),OVER(Sort:Name)
+
+#MESSAGE('Generating Global Data',3)
+#FOR(%GlobalData)
+%GlobalData   %GlobalDataStatement
+#ENDFOR
+
+#IF(%GlobalExternal)
+GlobalRequest     LONG(0),EXTERNAL
+GlobalResponse    LONG(0),EXTERNAL
+#ELSE
+GlobalRequest     LONG(0),THREAD
+GlobalResponse    LONG(0),THREAD
+#ENDIF
+#EMBED(%BeforeFileDeclarations,'Before File Declarations')
+#FOR(%File)
+  #IF(%DefaultGenerate)
+  #ELSIF(%OverrideGenerate)
+  #ELSE
+    #FIX(%UsedFile,%File)
+    #IF(NOT %UsedFile)
+      #CYCLE
+    #ENDIF
+  #ENDIF
+  #SET(%ValueConstruct,%FileStruct)
+  #CASE(%OverrideCreate)
+  #OF('Create File')
+    #SET(%ValueConstruct,%ValueConstruct & ',CREATE')
+  #OF('Do Not Create File')
+  #OF('Use Default')
+    #CASE(%DefaultCreate)
+    #OF('Create All')
+      #SET(%ValueConstruct,%ValueConstruct & ',CREATE')
+    #OF('Create None')
+    #OF('Use File Setting')
+      #IF(%FileCreate)
+        #SET(%ValueConstruct,%ValueConstruct & ',CREATE')
+      #ENDIF
+    #ENDCASE
+  #OF('')
+    #CASE(%DefaultCreate)
+    #OF('Create All')
+        #SET(%ValueConstruct,%ValueConstruct & ',CREATE')
+    #OF('Create None')
+    #OF('Use File Setting')
+      #IF(%FileCreate)
+        #SET(%ValueConstruct,%ValueConstruct & ',CREATE')
+      #ENDIF
+    #ENDCASE
+  #OF('Use File Setting')
+    #IF(%FileCreate)
+      #SET(%ValueConstruct,%ValueConstruct & ',CREATE')
+    #ENDIF
+  #ENDCASE
+  #SET(%FileThreadedFlag,%False)
+  #CASE(%OverrideThreaded)
+  #OF('Threaded')
+    #SET(%ValueConstruct,%ValueConstruct & ',THREAD')
+    #SET(%FileThreadedFlag,%True)
+  #OF('Not Threaded')
+  #OF('Use Default')
+    #CASE(%DefaultThreaded)
+    #OF('All Threaded')
+      #SET(%ValueConstruct,%ValueConstruct & ',THREAD')
+      #SET(%FileThreadedFlag,%True)
+    #OF('None Threaded')
+    #OF('Use File Setting')
+      #IF(%FileThreaded)
+        #SET(%ValueConstruct,%ValueConstruct & ',THREAD')
+        #SET(%FileThreadedFlag,%True)
+      #ENDIF
+    #ENDCASE
+  #OF('')
+    #CASE(%DefaultThreaded)
+    #OF('All Threaded')
+      #SET(%FileThreadedFlag,%True)
+      #SET(%ValueConstruct,%ValueConstruct & ',THREAD')
+    #OF('None Threaded')
+    #OF('Use File Setting')
+      #IF(%FileThreaded)
+        #SET(%FileThreadedFlag,%True)
+        #SET(%ValueConstruct,%ValueConstruct & ',THREAD')
+      #ENDIF
+    #ENDCASE
+  #OF('Use File Setting')
+    #IF(%FileThreaded)
+      #SET(%FileThreadedFlag,%True)
+      #SET(%ValueConstruct,%ValueConstruct & ',THREAD')
+    #ENDIF
+  #ENDCASE
+  #SET(%FileExternalFlag,%False)
+  #CASE(%OverrideExternal)
+  #OF('External')
+    #IF(%OverrideExternalAPP)
+      #SET(%FileExternalFlag,%True)
+    #ENDIF
+    #SET(%FileExternalFlag,%True)
+    #IF(%OverrideExternalSource)
+      #SET(%ValueConstruct,%ValueConstruct & ',EXTERNAL(%OverrideExternalSource)')
+    #ELSE
+      #SET(%ValueConstruct,%ValueConstruct & ',EXTERNAL('''')')
+    #ENDIF
+  #OF('Use Default')
+    #IF(%DefaultExternal='All External')
+      #IF(%DefaultExternalAPP)
+        #SET(%FileExternalFlag,%True)
+      #ENDIF
+      #IF(%DefaultExternalSource)
+        #SET(%ValueConstruct,%ValueConstruct & ',EXTERNAL(%DefaultExternalSource)')
+      #ELSE
+        #SET(%ValueConstruct,%ValueConstruct & ',EXTERNAL('''')')
+      #ENDIF
+    #ENDIF
+  #OF('Not External')
+  #ELSE
+    #IF(%DefaultExternal='All External')
+      #IF(%DefaultExternalAPP)
+        #SET(%FileExternalFlag,%True)
+      #ENDIF
+      #IF(%DefaultExternalSource)
+        #SET(%ValueConstruct,%ValueConstruct & ',EXTERNAL(%DefaultExternalSource)')
+      #ELSE
+        #SET(%ValueConstruct,%ValueConstruct & ',EXTERNAL('''')')
+      #ENDIF
+    #ENDIF
+  #ENDCASE
+  #EMBED(%BeforeFileDeclaration,'Before File Declaration'),HIDE
+#MESSAGE('File Structure: ' & %File,3)
+%ValueConstruct
+  #FOR(%Key)
+%KeyStruct
+  #ENDFOR
+  #FOR(%Field),WHERE(%FieldType = 'MEMO')
+%FieldStruct
+  #ENDFOR
+%FileStructRec
+  #FOR(%Field),WHERE(%FieldType <> 'MEMO')
+%FieldStruct
+  #ENDFOR
+%FileStructRecEnd
+%FileStructEnd
+  #IF(%FileExternalFlag)
+%File::Used LONG,EXTERNAL
+  #ELSE
+    #IF(%FileThreadedFlag)
+%File::Used LONG,THREAD
+    #ELSE
+%File::Used LONG
+    #ENDIF
+  #ENDIF
+
+#ENDFOR
+#EMBED(%AfterFileDeclarations,'After File Declarations')
+#!
+#EMBED(%GlobalData,'Global Data')
+#!
+  CODE
+#IF(%HelpFile)
+  HELP('%HelpFile')
+#ENDIF
+  #EMBED(%ProgramSetup,'Program Setup')
+  %FirstProcedure
+  #EMBED(%ProgramEnd,'Program End')
+
+#DECLARE(%SFTempFile)
+#SET(%SFTempFile,%Application & 'SF$')
+#MESSAGE('Generating Module:    ' & %SFFileName, 1) #! Post generation message
+#MESSAGE('Generating Procedure:  CheckOpen', 2) #! Post generation message
+#MESSAGE('',3)
+#CREATE(%SFTempFile)
+                  MEMBER('%Program')
+#MESSAGE('Generating CheckOpen',3)
+CheckOpen         PROCEDURE(File,OverrideCreate,OverrideOpenMode)
+
+  CODE
+  #EMBED(%CheckOpenSetup,'CheckOpen: Setup Procedure')
+  IF OMITTED(3)
+  #CASE(%DefaultOpenMode)
+  #OF('Share')
+    #SET(%AccessMode,'42h')
+  #OF('Open')
+    #SET(%AccessMode,'22h')
+  #OF('Other')
+    #CASE(%DefaultOtherAccess)
+    #OF('Deny None')
+      #SET(%AccessMode,'+DenyNone')
+    #OF('Deny Read')
+      #SET(%AccessMode,'+DenyRead')
+    #OF('Deny Write')
+      #SET(%AccessMode,'+DenyWrite')
+    #OF('Deny All')
+      #SET(%AccessMode,'+DenyAll')
+    #OF('Any Access')
+      #SET(%AccessMode,'+AnyAccess')
+    #ENDCASE
+    #CASE(%OverrideUserAccess)
+    #OF('Read/Write')
+      #SET(%AccessMode,',ReadWrite' & %AccessMode)
+    #OF('ReadOnly')
+      #SET(%AccessMode,',ReadOnly' & %AccessMode)
+    #OF('WriteOnly')
+      #SET(%AccessMode,',WriteOnly' & %AccessMode)
+    #ENDCASE
+  #ENDCASE
+    OPEN(File,%AccessMode)                     #<!Attempt to open the file
+  ELSE
+    OPEN(File,OverrideOpenMode)
+  END
+  CASE ERRORCODE()                             #<! and check for errors
+  OF NoError                                   #<!Return if no error
+    #EMBED(%CheckOpenNoError,'CheckOpen: No Error')
+  OROF IsOpenErr                               #<! or if already open.
+    #EMBED(%CheckOpenFileOpen,'CheckOpen: File Open Error')
+    DO ProcedureReturn
+  OF NoFileErr                                 #<!If file was not found
+    #EMBED(%CheckOpenNoFile,'CheckOpen: No File Error')
+    IF OMITTED(2)
+    #IF(%DefaultCreate = 'Create All')
+      DO CreateFile
+    #ELSIF(%DefaultCreate = 'Create None')
+      IF StandardWarning(Warn:CreateError,NAME(File)).
+    #ENDIF
+    ELSIF OverrideCreate = TRUE
+      DO CreateFile
+    ELSE
+      IF StandardWarning(Warn:CreateError,NAME(File)).
+    END
+  OF InvalidFileErr                            #<!Invalid Record Declaration
+    #EMBED(%CheckOpenBadFile,'CheckOpen: Invalid File Error')
+    IF StandardWarning(Warn:InvalidFile,NAME(File)).
+  OF BadKeyErr                                 #<!Key Files must be rebuilt
+    #EMBED(%CheckOpenBadKey,'CheckOpen: Bad Key Error')
+    IF StandardWarning(Warn:InvalidKey,NAME(File))
+      BUILD(File)                              !Rebuild the key files
+    END
+    IF ERRORCODE()
+      IF StandardWarning(Warn:RebuildError,NAME(File)).
+    ELSE
+      IF OMITTED(3)
+        OPEN(File,%AccessMode)                 #<!Attempt to open the file
+      ELSE
+        OPEN(File,OverrideOpenMode)
+      END
+    END
+  END                                          #<!End of Case Structure
+  IF ERRORCODE()
+    #EMBED(%CheckOpenFileError,'Check Open: Driver Error Handling')
+    IF StandardWarning(Warn:DiskError,NAME(File)) THEN HALT(0,'Disk Error').
+  END
+  DO ProcedureReturn
+ProcedureReturn ROUTINE
+  #EMBED(%CheckOpenExit,'CheckOpen: Directly before return')
+  RETURN
+CreateFile ROUTINE
+  CREATE(File)                               #<!Create the file
+  IF ERRORCODE()
+    IF ERRORCODE() = 90
+      IF StandardWarning(Warn:CreateError,NAME(File)).
+    ELSE
+      IF StandardWarning(Warn:CreateError,NAME(File)).
+    END
+  END
+  IF OMITTED(3)
+    OPEN(File,%AccessMode)                 #<!Attempt to open the file
+  ELSE
+    OPEN(File,OverrideOpenMode)
+  END
+  IF ~ERRORCODE()                            #<!  And return if it opened
+    DO ProcedureReturn
+  ELSE
+    IF StandardWarning(Warn:CreateOpenError,NAME(File)).
+  END
+
+#IF(%PrintPreviewUsed)
+#MESSAGE('Generating Procedure:  ReportPreview', 2) #! Post generation message
+ReportPreview        PROCEDURE(PrintPreviewQueue)
+LeftPageNumber       SHORT,AUTO
+RightPageNumber      SHORT,AUTO
+Preview:OpMode       BYTE,AUTO
+Preview:Op:Normal    EQUATE(0)
+Preview:Op:Zoom      EQUATE(1)
+Preview:Op:Facing    EQUATE(2)
+Preview:Zoomed       BYTE,AUTO
+Preview:Facing       BYTE,AUTO
+Preview:Pages        BYTE,AUTO
+Preview:Jump         LONG,AUTO
+PreviewWindow WINDOW('Print Preview'),AT(,,300,180),CENTER,STATUS(200,25,50,-1),SYSTEM,GRAY
+       MENUBAR,NOMERGE
+         ITEM('&Cancel!'),USE(?PreviewCancel),MSG('Cancel the printing of this report')
+         ITEM('&Print!'),USE(?PreviewPrint),MSG('Print this report')
+         ITEM('&Zoom In!'),USE(?PreviewZoom),MSG('Zoom in on a page of this report')
+         ITEM('&Previous Page!'),USE(?PreviewPreviousPage),MSG('View the previous page(s) of this report'), |
+             KEY(PgUpKey)
+         ITEM('&Next Page!'),USE(?PreviewNextPage),MSG('View the next page(s) of this report'),KEY(PgDnKey)
+         ITEM('&Jump!'),USE(?PreviewJump),MSG('Jump to a selected page of the report')
+         ITEM('&Facing Pages!'),USE(?PreviewFacing),MSG('View the report two pages at a time')
+       END
+       BOX,AT(9,2,136,176),USE(?Page1Frame)
+       IMAGE,AT(9,2,136,176),USE(?Page1Image)
+       REGION,AT(9,2,136,176),USE(?Page1Zoom)
+       BOX,AT(155,2,136,176),USE(?Page2Frame)
+       IMAGE,AT(155,2,136,176),USE(?Page2Image)
+       REGION,AT(155,2,136,176),USE(?Page2Zoom)
+       BOX,AT(84,2,136,176),USE(?SingleFrame)
+       IMAGE,AT(84,2,136,176),USE(?SingleImage)
+       REGION,AT(84,2,136,176),USE(?SingleZoom)
+       IMAGE,AT(0,0,300,180),USE(?SingleZoomImage),HVSCROLL
+     END
+JumpWindow WINDOW('Jump to a Report Page'),AT(,,150,18),FONT('System',10,,FONT:bold),CENTER,STATUS,GRAY
+       PROMPT('Page:'),AT(4,4,,),USE(?JumpPrompt)
+       SPIN(@n5),AT(27,4,32,10),USE(Preview:Jump),RANGE(1,100),STEP(1),MSG('Select a page of the report')
+       BUTTON('OK'),AT(74,4,32,10),USE(?OKButton),DEFAULT,MSG('Jump to the selected page')
+       BUTTON('Cancel'),AT(111,4,32,10),USE(?CancelButton),MSG('Cancel this selection')
+     END
+   CODE
+   GlobalResponse = RequestCancelled
+   OPEN(PreviewWindow)
+   RightPageNumber = 1
+   Preview:OpMode = Preview:Op:Normal
+   Preview:Zoomed = False
+   Preview:Facing = False
+   IF RECORDS(PrintPreviewQueue) = 1
+     DISABLE(?PreviewFacing)
+   END
+   DO LoadPages
+   ACCEPT
+     CASE EVENT()
+     OF Event:Accepted
+       CASE FIELD()
+       OF ?SingleZoom
+       OROF ?Page2Zoom
+         POST(Event:Accepted,?PreviewZoom)
+       OF ?Page1Zoom
+         RightPagenumber = LeftPageNumber
+         POST(Event:Accepted,?PreviewZoom)
+       OF ?PreviewCancel
+         POST(Event:CloseWindow)
+       OF ?PreviewPrint
+         GlobalResponse = RequestCompleted
+         POST(Event:CloseWindow)
+       OF ?PreviewPreviousPage
+         IF Preview:OpMode = Preview:Op:Facing
+           RightPageNumber -= 2
+         ELSE
+           RightPageNumber -= 1
+         END
+         DO LoadPages
+       OF ?PreviewNextPage
+         IF Preview:OpMode = Preview:Op:Facing
+           RightPageNumber += 2
+         ELSE
+           RightPageNumber += 1
+         END
+         DO LoadPages
+       OF ?PreviewZoom
+         IF Preview:OpMode = Preview:Op:Zoom
+           ?PreviewFacing{Prop:Disable} = False
+           Preview:Zoomed = False
+           ?PreviewZoom{Prop:Text} = '&Zoom In!'
+           ?PreviewZoom{Prop:Msg} = 'Zoom in on a page of this report'
+           IF Preview:Facing
+             Preview:OpMode = Preview:Op:Facing
+           ELSE
+             Preview:OpMode = Preview:Op:Normal
+           END
+         ELSE
+           ?PreviewFacing{Prop:Disable} = True
+           Preview:OpMode = Preview:Op:Zoom
+           Preview:Zoomed = False
+           ?PreviewZoom{Prop:Text} = '&Zoom Out!'
+           IF Preview:Facing
+             ?PreviewZoom{Prop:Msg} = 'Zoom out to facing page mode'
+           ELSE
+             ?PreviewZoom{Prop:Msg} = 'Zoom out to full page mode'
+           END
+         END
+         DO LoadPages
+       OF ?PreviewFacing
+         IF Preview:OpMode = Preview:Op:Facing
+           IF RightPageNumber > RECORDS(PrintPreviewQueue)
+             RightPageNumber = LeftPageNumber
+           END
+           Preview:OpMode = Preview:Op:Normal
+           Preview:Facing = False
+           ?PreviewFacing{Prop:Text} = '&Facing Pages!'
+           ?PreviewFacing{Prop:Msg} = 'View the report two pages at a time'
+         ELSE
+           IF RightPageNumber % 2 = 0
+             RightPageNumber += 1
+             LeftPageNumber += 1
+           END
+           Preview:Facing = True
+           Preview:OpMode = Preview:Op:Facing
+           ?PreviewFacing{Prop:Text} = '&Single Pages!'
+           ?PreviewFacing{Prop:Msg} = 'View the report one page at a time'
+         END
+         DO LoadPages
+       OF ?PreviewJump
+         OPEN(JumpWindow)
+         IF RightPageNumber > RECORDS(PrintPreviewQueue)
+           Preview:Jump = LeftPageNumber
+         ELSE
+           Preview:Jump = RightPageNumber
+         END
+         ?Preview:Jump{Prop:RangeHigh} = RECORDS(PrintPreviewQueue)
+         ACCEPT
+           CASE ACCEPTED()
+           OF ?OKButton
+             RightPageNumber = Preview:Jump
+             POST(Event:CloseWindow)
+           OF ?CancelButton
+             POST(Event:CloseWindow)
+           END
+         END
+         CLOSE(JumpWindow)
+         DO LoadPages
+       END
+     END
+   END
+   RETURN
+
+LoadPages ROUTINE
+   LeftPageNumber = RightPageNumber - 1
+   IF Preview:OpMode = Preview:Op:Normal
+     IF ?Page1Image{Prop:Hide} = False
+       HIDE(?Page1Image)
+       HIDE(?Page1Frame)
+       DISABLE(?Page1Zoom)
+     END
+     IF ?Page2Image{Prop:Hide} = False
+       HIDE(?Page2Frame)
+       HIDE(?Page2Image)
+       DISABLE(?Page2Zoom)
+     END
+     IF ?SingleZoomImage{Prop:Hide} = False
+       HIDE(?SingleZoomImage)
+     END
+     IF ?SingleImage{Prop:Hide} = True
+       UNHIDE(?SingleImage)
+       UNHIDE(?SingleFrame)
+       ENABLE(?SingleZoom)
+     END
+     GET(PrintPreviewQueue,RightPageNumber)
+     ?SingleImage{Prop:Text} = PrintPreviewQueue
+     PreviewWindow{Prop:StatusText,2} = ''
+     PreviewWindow{Prop:StatusText,3} = 'Single Page'
+     PreviewWindow{Prop:StatusText,4} = 'Page ' & RightPageNumber & ' of ' & RECORDS(PrintPreviewQueue)
+   ELSIF Preview:OpMode = Preview:Op:Facing
+     IF RightPageNumber % 2 = 0
+       RightPageNumber += 1
+       LeftPageNumber += 1
+     END
+     IF ?SingleZoomImage{Prop:Hide} = False
+       HIDE(?SingleZoomImage)
+     END
+     IF ?SingleImage{Prop:Hide} = False
+       HIDE(?SingleImage)
+       HIDE(?SingleFrame)
+       DISABLE(?SingleZoom)
+     END
+     IF LeftPageNumber = 0
+       IF ?Page1Image{Prop:Hide} = False
+         HIDE(?Page1Image)
+         HIDE(?Page1Frame)
+         DISABLE(?Page1Zoom)
+       END
+     ELSE
+       IF ?Page1Image{Prop:Hide} = True
+         UNHIDE(?Page1Image)
+         UNHIDE(?Page1Frame)
+         ENABLE(?Page1Zoom)
+       END
+       GET(PrintPreviewQueue,LeftPageNumber)
+       ?Page1Image{Prop:Text} = PrintPreviewQueue
+     END
+     IF LeftPageNumber = RECORDS(PrintPreviewQueue)
+       IF ?Page2Image{Prop:Hide} = False
+         HIDE(?Page2Image)
+         HIDE(?Page2Frame)
+         DISABLE(?Page2Zoom)
+       END
+     ELSE
+       IF ?Page2Image{Prop:Hide} = True
+         UNHIDE(?Page2Image)
+         UNHIDE(?Page2Frame)
+         ENABLE(?Page2Zoom)
+       END
+       GET(PrintPreviewQueue,RightPageNumber)
+       ?Page2Image{Prop:Text} = PrintPreviewQueue
+     END
+     IF LeftPageNumber AND RightPageNumber =< RECORDS(PrintPreviewQueue)
+       PreviewWindow{Prop:StatusText,4} = 'Pages ' & LeftPageNumber & ' and ' & RightPageNumber & ' of ' & RECORDS(PrintPreviewQueue)
+     ELSIF LeftPageNumber AND RightPageNumber > RECORDS(PrintPreviewQueue)
+       PreviewWindow{Prop:StatusText,4} = 'Page ' & LeftPageNumber & ' of ' & RECORDS(PrintPreviewQueue)
+     ELSE
+       PreviewWindow{Prop:StatusText,4} = 'Page ' & RightPageNumber & ' of ' & RECORDS(PrintPreviewQueue)
+     END
+     PreviewWindow{Prop:StatusText,2} = ''
+     PreviewWindow{Prop:StatusText,3} = 'Facing Pages'
+   ELSE
+     IF ?Page1Image{Prop:Hide} = False
+       HIDE(?Page1Image)
+       HIDE(?Page1Frame)
+       DISABLE(?Page1Zoom)
+     END
+     IF ?Page2Image{Prop:Hide} = False
+       HIDE(?Page2Frame)
+       HIDE(?Page2Image)
+       DISABLE(?Page2Zoom)
+     END
+     IF ?SingleZoomImage{Prop:Hide} = False
+       HIDE(?SingleZoomImage)
+     END
+     IF ?SingleImage{Prop:Hide} = False
+       HIDE(?SingleImage)
+       HIDE(?SingleFrame)
+       DISABLE(?SingleZoom)
+     END
+     GET(PrintPreviewQueue,RightPageNumber)
+     ?SingleZoomImage{Prop:Text} = PrintPreviewQueue
+     UNHIDE(?SingleZoomImage)
+     PreviewWindow{Prop:StatusText,2} = 'ZOOM'
+     PreviewWindow{Prop:StatusText,3} = 'Single Page'
+     PreviewWindow{Prop:StatusText,4} = 'Page ' & RightPageNumber & ' of ' & RECORDS(PrintPreviewQueue)
+   END
+   IF RightPageNumber = 1
+     DISABLE(?PreviewPreviousPage)
+   ELSE
+     ENABLE(?PreviewPreviousPage)
+   END
+   IF RightPageNumber => RECORDS(PrintPreviewQueue)
+     DISABLE(?PreviewNextPage)
+   ELSE
+     ENABLE(?PreviewNextPage)
+   END
+
+#ENDIF
+#IF(%INIActive)
+#MESSAGE('Generating Procedure:  INIRestoreWindow', 2) #! Post generation message
+INIRestoreWindow   PROCEDURE(ProcedureName,INIFileName)
+
+INI::XPosit        LONG,AUTO
+INI::YPosit        LONG,AUTO
+INI::Width         LONG,AUTO
+INI::Height        LONG,AUTO
+INI::String        STRING(20),AUTO
+
+  CODE
+  INI::XPosit = GETINI(ProcedureName,'XPosit',,INIFileName)
+  IF NOT INI::XPosit THEN RETURN.
+  LOOP
+    IF TARGET{Prop:Maximize} = FALSE
+      INI::XPosit = GETINI(ProcedureName,'XPosit',,INIFileName)
+      IF NOT INI::XPosit THEN BREAK.
+      INI::YPosit = GETINI(ProcedureName,'YPosit',,INIFileName)
+      IF NOT INI::YPosit THEN BREAK.
+      IF TARGET{Prop:Resize}
+        INI::Width = GETINI(ProcedureName,'Width',,INIFileName)
+        IF NOT INI::Width THEN BREAK.
+        INI::Height = GETINI(ProcedureName,'Height',,INIFileName)
+        IF NOT INI::Height THEN BREAK.
+      ELSE
+        INI::Width = TARGET{Prop:Width}
+        INI::Height = TARGET{Prop:Height}
+      END
+      SETPOSITION(0,INI::XPosit,INI::YPosit,INI::Width,INI::Height)
+    END
+    BREAK
+  END
+  INI::String = GETINI(ProcedureName,'Maximize',,INIFileName)
+  IF INI::String = 'Yes'
+    TARGET{Prop:Maximize}=1
+  ELSE
+    TARGET{Prop:Maximize}=0
+  END
+  RETURN
+
+#MESSAGE('Generating Procedure:  INISaveWindow', 2) #! Post generation message
+INISaveWindow   PROCEDURE(ProcedureName,INIFileName)
+INI::Section       CSTRING(80)
+INI::String        CSTRING(20)
+INI::Entry         CSTRING(20)
+  CODE
+  INI::Section = ProcedureName
+  INI::Entry = 'Maximize'
+  IF Target{Prop:Maximize}
+    INI::String = 'Yes'
+  ELSE
+    INI::String = 'No'
+  END
+  TARGET{PROP:Maximize} = 0
+  PUTINI(INI::Section,INI::Entry,INI::String,INIFileName)
+  INI::Entry = 'XPosit'
+  INI::String = TARGET{Prop:XPos}
+  PUTINI(INI::Section,INI::Entry,INI::String,INIFileName)
+  INI::Entry = 'YPosit'
+  INI::String = TARGET{Prop:YPos}
+  PUTINI(INI::Section,INI::Entry,INI::String,INIFileName)
+  INI::Entry = 'Width'
+  INI::String = TARGET{Prop:Width}
+  PUTINI(INI::Section,INI::Entry,INI::String,INIFileName)
+  INI::Entry = 'Height'
+  INI::String = TARGET{Prop:Height}
+  PUTINI(INI::Section,INI::Entry,INI::String,INIFileName)
+  RETURN
+#ENDIF
+
+#MESSAGE('Generating Procedure:  StandardWarning', 2) #! Post generation message
+StandardWarning      FUNCTION(WarningID,WarningText1,WarningText2,WarningText3,WarningText4)
+ErrorText            STRING(150),AUTO
+ReturnValue          LONG
+  CODE
+  IF ERRORCODE() <> 90
+    ErrorText = CLIP(ERROR()) & ' (' & ERRORCODE() & ')'
+  ELSE
+    ErrorText = CLIP(FILEERROR()) & ' (' & CLIP(FILEERRORCODE()) & ')'
+  END
+  CASE WarningID
+  OF Warn:InvalidFile
+    IF MESSAGE('Error: (' & CLIP(ErrorText) & ') accessing ' |
+    & CLIP(WarningText1) & '.  Press OK to end this application.'|
+    ,'Invalid File',ICON:Exclamation,Button:OK,BUTTON:OK,0).
+    HALT(0,'Invalid File!')
+  OF Warn:InvalidKey     
+    IF MESSAGE(CLIP(WarningText1) & ' key file is invalid.  Do you '|
+    &'want to rebuild the key?','Invalid Key',Icon:Question,|
+    Button:Yes+Button:No,Button:Yes,0)=Button:No
+      HALT(0,'Invalid Key!')
+    ELSE
+      RETURN(Button:Yes)
+    END
+  OF Warn:RebuildError   
+    IF MESSAGE('Error: (' & CLIP(ErrorText) & ') repairing key for ' |
+    & CLIP(WarningText1) & '.  Press OK to end this application.',|
+    'Key Rebuild Error',ICON:Exclamation,Button:OK,BUTTON:OK,0).
+    HALT(0,'Error Rebuilding Key!')
+  OF Warn:CreateError    
+    IF MESSAGE('Error: (' & CLIP(ErrorText) & ') creating ' |
+    & CLIP(WarningText1) & '.  Press OK to end this application.',|
+    'File Creation Error',ICON:Exclamation,Button:OK,BUTTON:OK,0).
+    HALT(0,'File Creation Error!')
+  OF Warn:CreateOpenError
+    IF MESSAGE('Error: (' & CLIP(ErrorText) & ') opening created ' |
+    & 'file:' & CLIP(WarningText1) & '.  Press OK to end this application.',|
+    'File Creation Error',ICON:Exclamation,Button:OK,BUTTON:OK,0).
+    HALT(0,'File Creation Error!')
+  OF Warn:ProcedureToDo  
+    RETURN(MESSAGE('The Procedure ' & CLIP(WarningText1) & ' has not '|
+    &'been defined.','Procedure not defined',ICON:Exclamation,|
+    Button:OK,BUTTON:OK,0))
+  OF Warn:BadKeyedRec
+    RETURN(MESSAGE('Unable to read keyed record.  Error: ' |
+    & CLIP(ErrorText) & '.  Insert Aborted',ICON:Exclamation,|
+    Button:OK,Button:OK,0))
+  OF Warn:OutOfRangeHigh
+    RETURN(MESSAGE('The value of ' & CLIP(WarningText1) & ' must'|
+    &' be lower than ' & CLIP(WarningText2) & '.','Range Error',|
+    ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:OutOfRangeLow  
+    RETURN(MESSAGE('The value of ' & CLIP(WarningText1) & ' must be'|
+    &' higher than ' & CLIP(WarningText2) & '.','Range Error',|
+    ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:OutOfRange     
+    RETURN(MESSAGE('The value of ' & CLIP(WarningText1) & ' must be '|
+    &'between ' & CLIP(WarningText2) & ' and ' & CLIP(WarningText3) |
+    & '.','Range Error',ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:NotInFile
+    RETURN(MESSAGE('The value for ' & CLIP(WarningText1) & ' must be '|
+    &'found in the ' & CLIP(WarningText2) & ' file.','Field Contents '|
+    &'Error',ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:RestrictUpdate 
+    RETURN(MESSAGE('This record is referenced from the file '|
+    & CLIP(WarningText1) & '.  Linking field(s) have been restricted'|
+    & ' from change and have been reset to original values.',|
+    'Referential Integrity Update Error',ICON:Exclamation,|
+    Button:OK,Button:OK,0))
+  OF Warn:RestrictDelete 
+    RETURN(MESSAGE('This record is referenced from the file '|
+    & CLIP(WarningText1) & '.  This record cannot be deleted while'|
+    & ' these references exist.','Referential Integrity Delete Error'|
+    ,ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:InsertError
+    RETURN(MESSAGE('An error was experienced during the update of'|
+    & ' record.  Error: ' & CLIP(ErrorText) & '.'|
+    ,'Record Insert Error'|
+    ,ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:RIUpdateError
+    IF ERRORCODE()
+      RETURN(MESSAGE('An error (' & CLIP(ErrorText) & ') was experienced'|
+      &' when attempting to update a record from the file.  Probable Cause: ' |
+      & CLIP(WarningText1) & '.','Update Operation Error',Icon:Exclamation,|
+      Button:OK,Button:OK,0))
+    ELSE
+      RETURN(MESSAGE('This record was changed by another station.'|
+      ,'Update Operation Error',Icon:Exclamation,|
+      Button:OK,Button:OK,0))
+    END
+  OF Warn:UpdateError
+    RETURN(MESSAGE('An error was experienced changing this record.  '|
+    &'Do you want to try to save again?','Record Update Error',|
+    Icon:Exclamation,Button:Yes+Button:No+Button:Cancel,Button:Cancel,0))
+  OF Warn:RIDeleteError
+    RETURN(MESSAGE('An error (' & CLIP(ErrorText) & ') was experienced'|
+    &' when attempting to delete a record from the file ' |
+    & CLIP(WarningText1) & '.','Delete Operation Error',Icon:Exclamation,|
+    Button:OK,Button:OK,0))
+  OF Warn:DeleteError    
+    RETURN(MESSAGE('An error was experienced deleting this record.  '|
+    &'Do you want to try to save again?','Record Update Error',|
+    Icon:Exclamation,Button:Yes+Button:No+Button:Cancel,Button:Cancel,0))
+  OF Warn:InsertDisabled 
+    RETURN(MESSAGE('This procedure was called to insert a record, '|
+    & 'however inserts are not allowed for this procedure.  Press OK '|
+    & 'to return to the calling procedure','Invalid Request',|
+    Icon:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:UpdateDisabled
+    RETURN(MESSAGE('This procedure was called to change a record, '|
+    & 'however changes are not allowed for this procedure.  Press OK '|
+    & 'to return to the calling procedure','Invalid Request',|
+    ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:DeleteDisabled 
+    RETURN(MESSAGE('This procedure was called to delete a record, '|
+    & 'however deletions are not allowed for this procedure.  Press OK '|
+    & 'to return to the calling procedure','Invalid Request',|
+    ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:NoCreate       
+    IF MESSAGE('The File ' & CLIP(WarningText1) & 'was not found, '|
+    &'and creation of the file is not allowed.  Press OK to end '|
+    &'this application.','File Creation Not Allowed',ICON:Exclamation,|
+    Button:OK,BUTTON:OK,0)
+      HALT(0,'File Creation Error!')
+    END
+  OF Warn:ConfirmCancel  
+    RETURN(MESSAGE('Are you sure you want to cancel?'|
+    ,'Update Cancelled',ICON:Question,Button:Yes+Button:No,|
+    Button:No,0))
+  OF Warn:DuplicateKey
+    RETURN(MESSAGE('Adding this record creates a duplicate entry '|
+    &'for the key:' & CLIP(WarningText1),'Duplicate Key Error',|
+    ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:AutoIncError
+    RETURN(MESSAGE('Attempts to automatically number this record have '|
+    &'failed.  Error: ' & CLIP(ErrorText) & '.',|
+    'Auto Increment Error',Icon:Exclamation,Button:Cancel+Button:Retry,|
+    Button:Cancel,0))
+  OF Warn:FileLoadError
+    RETURN(MESSAGE(CLIP(WarningText1) & ' File Load Error.  '|
+    &'Error: ' & CLIP(ErrorText) & '.','File Load Error',ICON:Exclamation,|
+    Button:OK,Button:OK,0))
+  OF Warn:ConfirmCancelLoad
+    RETURN(MESSAGE('Are you certain you want to stop loading ' |
+    & CLIP(WarningText1) & '?','Cancel Request',|
+    ICON:Question,Button:OK+Button:Cancel,Button:Cancel,0))
+  OF Warn:FileZeroLength
+    RETURN(MESSAGE(CLIP(WarningText1) & ' File Load Error.  '|
+    &'The file you''ve requested contains no text.','File Load Error',|
+    ICON:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:EndOfASCIIQueue
+    IF WarningText1 = 'Down'
+      RETURN(MESSAGE('The end of the viewed file was encountered.  '|
+      & 'Do you want to start again from the beginning?',|
+      'End of File Error',ICON:Question,Button:Yes+Button:No,Button:Yes,0))
+    ELSE
+      RETURN(MESSAGE('The beginning of the viewed file was encountered.  '|
+      & 'Do you want to start again from the end of the file?',|
+      'Beginning of File Error',ICON:Question,Button:Yes+Button:No,|
+      Button:Yes,0))
+    END
+  OF Warn:DiskError
+    RETURN(MESSAGE('File (' & CLIP(WarningText1) & ') could not be '|
+    & 'opened.  Error: ' & CLIP(ErrorText) & '.','File Access Error'|
+    ,Icon:Exclamation,Button:OK,Button:OK,0))
+  OF Warn:ProcessActionError
+    IF WarningText1 = 'Put'
+      RETURN(MESSAGE('An error was experienced when making changes'|
+      & ' to the ' & CLIP(WarningText2) & ' file.  Error: '|
+      & CLIP(ErrorText),'Process PUT Error',Icon:Exclamation|
+      ,Button:OK,Button:OK,0))
+    ELSE
+      RETURN(MESSAGE('An error was experienced when deleting a record'|
+      & ' from the ' & CLIP(WarningText2) & ' file.  Error: '|
+      & CLIP(ErrorText),'Process DELETE Error',Icon:Exclamation|
+      ,Button:OK,Button:OK,0))
+    END
+  OF Warn:StandardDelete
+    RETURN(MESSAGE('You''ve selected to delete the highlighted record.  '|
+    &'Press OK to confirm deletion of this record.',|
+    'Confirm Delete',Icon:Question,Button:OK+Button:Cancel,Button:Cancel,0))
+  OF Warn:SaveOnCancel
+    RETURN(MESSAGE('Do you want to save the changes to this record?'|
+    ,'Update Cancelled',ICON:Question,Button:Yes+Button:No+Button:Cancel,|
+    Button:No,0))
+  END
+#CLOSE(%SFTempFile)
+#REPLACE(%SFFileName,%SFTempFile)
+#REMOVE(%SFTempFile)
+#INSERT(%RICode)
+#MESSAGE('Generating Module:    ' & %Application & '.EXP', 1) #! Post generation message
+#MESSAGE('Generating Export File', 2) #! Post generation message
+#MESSAGE('',3)
+#SET(%ExportBuildFile,%Application & '.ex1')
+#SET(%ExportFile,%Application & '.exp')
+#CREATE(%ExportBuildFile)
+#IF(%ProgramExtension='DLL')
+LIBRARY %Application
+#ELSE
+NAME %Application WINDOWAPI
+#ENDIF
+
+CODE MOVEABLE DISCARDABLE PRELOAD
+DATA MOVEABLE SINGLE PRELOAD
+
+HEAPSIZE  1024
+STACKSIZE 32678
+
+SEGMENTS
+     ENTERCODE MOVEABLE DISCARDABLE PRELOAD
+
+EXETYPE WINDOWS
+
+#IF(%ProgramExtension='DLL')
+EXPORTS
+  #FOR(%Procedure)
+    #IF(%ProcedureExported)
+  %Procedure
+    #ENDIF
+  #ENDFOR
+  #FOR(%File)
+    #IF(%DefaultGenerate)
+    #ELSIF(%OverrideGenerate)
+    #ELSE
+      #FIX(%UsedFile,%File)
+      #IF(NOT %UsedFile)
+        #CYCLE
+      #ENDIF
+    #ENDIF
+    #IF(%OverrideExternal='Not External')
+      #IF(%OverrideExport)
+  $%File
+        #FOR(%Key)
+  $%Key
+        #ENDFOR
+        #FOR(%Field),WHERE(%FieldType = 'MEMO')
+  $%Field
+        #ENDFOR
+  $%FilePrefix:RECORD
+  $%File::Used
+      #ENDIF
+    #ELSIF((NOT %OverrideExternal) OR %OverrideExternal = 'Use Default')
+      #IF(%DefaultExport)
+  $%File
+        #FOR(%Key)
+  $%Key
+        #ENDFOR
+        #FOR(%Field),WHERE(%FieldType = 'MEMO')
+  $%Field
+        #ENDFOR
+  $%FilePrefix:RECORD
+  $%File::Used
+      #ENDIF
+    #ENDIF
+  #ENDFOR
+  #IF(NOT %GlobalExternal)
+  $GlobalRequest
+  $GlobalResponse
+    #FOR(%GlobalData),WHERE(%GlobalData)
+      #IF(NOT EXTRACT(%GlobalDataStatement,'EXTERNAL'))
+  $%GlobalData
+      #ENDIF
+    #ENDFOR
+  #ENDIF
+  #EMBED(%DLLExportList,'Inside the Export List'),WHERE(%ProgramExtension='DLL')
+#ENDIF
+#CLOSE(%ExportBuildFile)
+#REPLACE(%ExportFile,%ExportBuildFile)
+#REMOVE(%ExportBuildFile)
+#MESSAGE('Generating Module:    ' & %Application & '.SHP', 1) #! Post generation message
+#MESSAGE('Generating Ship List', 2) #! Post generation message
+#MESSAGE('',3)
+#CREATE(%Application & '.shp')
+Clarion for Windows
+-------------------
+    Ship List
+
+The following files must be shipped with your application.
+
+NOTE:  This list only includes those files that are VISIBLE
+       to the Clarion for Windows templates.  Any DLLs loaded
+       in EMBEDs or INCLUDE files may not be visible to the
+       templates, and may not be in this list.
+
+NOTE:  In the case of External Library modules, the .LIB file
+       will be listed below.  Some of these .LIBs (WINDOWS.LIB
+       for example) do not have DLLs associated with them.  In
+       most cases you will need to ship an associated DLL.
+
+NOTE:  In the case of an External Library module generated by
+       AppGen, you must insure that all files on the shipping
+       list for that LIB/DLL are also included.
+
+
+___  Executable Program:  %Application.EXE
+
+     DLLs associated with the following libraries. (If Any)
+
+#FOR(%Module),WHERE(%ModuleExternal)
+___    %Module
+
+#ENDFOR
+
+     The following CW DLLs
+
+___    CWRUN10.DLL - Clarion for Windows Library
+
+#FOR(%UsedDriverDLLs)
+  #FIX(%Driver,%UsedDriverDLLs)
+___    %UsedDriverDLLs - %DriverDescription
+
+#ENDFOR
+#IF(ITEMS(%VBXUsed))
+___    CWVBX.DLL - Clarion for Windows VBX Support Library
+
+     The following VBXs
+
+  #FOR(%VBXUsed)
+___       %VBXUsed
+
+  #ENDFOR
+
+  #EMBED(%ShipList,'Inside the Shipping List')
+#ENDIF
+#CLOSE

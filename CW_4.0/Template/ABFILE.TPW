@@ -1,0 +1,488 @@
+#GROUP(%WriteBCModules),AUTO
+#DECLARE(%BCFilename)
+#DECLARE(%BCCount,LONG)
+#DECLARE(%LowBCInstance,LONG)
+#SET(%LowBCInstance,0)
+#!
+#!
+#!
+#LOOP,FOR(%BCCount,1,%BCModulesNeeded())
+  #SET(%BCFilename,%MakeBCFilename(%BCCount))
+  #MESSAGE('Generating Module:  '&%BCFilename,1)
+  #MESSAGE('',2)
+  #MESSAGE('',3)
+  #CREATE('BC.$$$')
+  #CALL(%WriteBCModule,%LowBCInstance,%BCFilename)
+  #CLOSE('BC.$$$')
+  #REPLACE(%BCFilename,'BC.$$$')
+  #REMOVE('BC.$$$')
+  #PROJECT(%BCFilename)
+#ENDLOOP
+#!
+#SET(%BCFilename,%MakeMainBCFilename())
+#MESSAGE('Generating Module:  '&%BCFilename,1)
+#CREATE('BC.$$$')
+  MEMBER('%Program')
+
+  MAP
+#LOOP,FOR(%BCCount,1,%BCModulesNeeded())
+    MODULE(%(''''&%MakeBCFilename(%BCCount)&''''))
+%(%RemoveExt(%MakeBCFilename(%BCCount))):DctInit             PROCEDURE
+%(%RemoveExt(%MakeBCFilename(%BCCount))):DctKill             PROCEDURE
+%(%RemoveExt(%MakeBCFilename(%BCCount))):FilesInit           PROCEDURE
+    END
+#ENDLOOP
+  END
+
+DctInit PROCEDURE
+  CODE
+#LOOP,FOR(%BCCount,1,%BCModulesNeeded())
+  %(%RemoveExt(%MakeBCFilename(%BCCount))):DctInit
+#ENDLOOP
+#LOOP,FOR(%BCCount,1,%BCModulesNeeded())
+  %(%RemoveExt(%MakeBCFilename(%BCCount))):FilesInit
+#ENDLOOP
+
+
+DctKill PROCEDURE
+  CODE
+#LOOP,FOR(%BCCount,1,%BCModulesNeeded())
+  %(%RemoveExt(%MakeBCFilename(%BCCount))):DctKill
+#ENDLOOP
+
+#CLOSE('BC.$$$')
+#REPLACE(%BCFilename,'BC.$$$')
+#REMOVE('BC.$$$')
+#PROJECT(%BCFilename)
+#!
+#!
+#GROUP(%WriteBCModule,*%LowFileInstance,%BCFilename),AUTO
+#DECLARE(%Cnt,LONG)
+#DECLARE(%RelateCnt,LONG)
+#DECLARE(%ThisOpenMode)
+#DECLARE(%ThisOtherAccess)
+#DECLARE(%ThisUserAccess)
+#DECLARE(%ThisCreate)
+#DECLARE(%LogoutDesired)
+#DECLARE(%UpdateStrategy)
+#DECLARE(%DeleteStrategy)
+#DECLARE(%BCIncludeList),UNIQUE
+#DECLARE(%FileManagerLine,%File),UNIQUE
+#DECLARE(%RelationManagerLine,%File),UNIQUE
+#DECLARE(%HighFileInstance,LONG)
+#DECLARE(%ThisObjectName,@S255)
+#EQUATE(%FileCount,0)
+#FOR(%File),WHERE(INSTANCE(%File)>=%LowFileInstance AND %FileIsUsed())
+  #SET(%FileCount,%FileCount+1)
+  #SET(%HighFileInstance,INSTANCE(%File))
+  #IF(%FileCount=%FilesPerBCModule)
+    #BREAK
+  #ENDIF
+#ENDFOR
+#!
+#!
+#SECTION
+#CREATE('PBDY.$$$')
+%(%RemoveExt(%BCFilename)):DctInit PROCEDURE
+  CODE
+#FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+  #CALL(%MakeDeclr,24,%OOPConstruct,'Init','PROCEDURE')
+  #ADD(%FileManagerLine,%OOPConstruct)
+  #ADD(%RelationManagerLine,%OOPConstruct)
+  Relate:%File &= Hide:Relate:%File
+#ENDFOR
+
+%(%RemoveExt(%BCFilename)):FilesInit PROCEDURE
+  CODE
+#FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+  #CALL(%MakeDeclr,24,%OOPConstruct,'Init','PROCEDURE')
+  #ADD(%FileManagerLine,%OOPConstruct)
+  #ADD(%RelationManagerLine,%OOPConstruct)
+  Hide:Relate:%File.Init
+#ENDFOR
+
+
+%(%RemoveExt(%BCFilename)):DctKill PROCEDURE
+  CODE
+#FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+  #CALL(%MakeDeclr,24,%OOPConstruct,'Kill','PROCEDURE')
+  #ADD(%FileManagerLine,%OOPConstruct)
+  #SET(%OOPConstruct,%OOPConstruct&',VIRTUAL')
+  #ADD(%RelationManagerLine,%OOPConstruct)
+  Hide:Relate:%File.Kill
+#ENDFOR
+
+#FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+
+Hide:Access:%File.Init PROCEDURE
+  CODE
+  PARENT.Init(%File,GlobalErrors)
+  #IF (%FileName)
+    #IF (SUB(%FileName,1,1)<>'''')
+  SELF.FileName &= %FileName
+    #ENDIF
+  #ELSE
+  SELF.FileNameValue = '%File'
+  #ENDIF
+  SELF.Buffer &= %FilePrefix:Record
+  #IF(%AliasFile)
+  SELF.AliasedFile &= Access:%AliasFile         #<!This is a File Alias, so assign aliased file
+  #ENDIF
+  #SET(%ThisOpenMode,%DefaultOpenMode)
+  #SET(%ThisOtherAccess,%DefaultOtherAccess)
+  #SET(%ThisUserAccess,%DefaultUserAccess)
+  #SET(%ThisCreate,%DefaultCreate)
+  #IF (%OverrideOpenMode <> 'Use Default')
+    #SET(%ThisOpenMode,%OverrideOpenMode)
+  #ENDIF
+  #IF (%OverrideOtherAccess <> 'Use Default')
+    #SET(%ThisOtherAccess,%OverrideOtherAccess)
+  #ENDIF
+  #IF (%OverrideUserAccess <> 'Use Default')
+    #SET(%ThisUserAccess,%OverrideUserAccess)
+  #ENDIF
+  #IF (%OverrideCreate <> 'Use Default')
+    #SET(%ThisCreate,%OverrideCreate)
+  #ENDIF
+  #CASE(%ThisOpenMode)
+  #OF('Open')
+  SELF.OpenMode = 22h
+  #OF('Other')
+    #CASE(%ThisOtherAccess)
+    #OF('Deny None')
+  SELF.OpenMode = DenyNone
+    #OF('Deny Read')
+  SELF.OpenMode = DenyRead
+    #OF('Deny Write')
+  SELF.OpenMode = DenyWrite
+    #OF('Deny All')
+  SELF.OpenMode = DenyAll
+    #OF('Any Access')
+  SELF.OpenMode = AnyAccess
+    #ENDCASE
+    #CASE(%ThisUserAccess)
+    #OF('Read/Write')
+  SELF.OpenMode += ReadWrite
+    #OF('Read Only')
+  SELF.OpenMode += ReadOnly
+    #OF('Write Only')
+  SELF.OpenMode += WriteOnly
+    #ENDCASE
+  #ENDCASE
+  #CASE(%ThisCreate)
+  #OF('Use File Setting')
+  SELF.Create = %(CHOOSE(%FileCreate,1,0))
+  #OF('Create File')
+  #OROF('Create All')
+  SELF.Create = 1
+  #OF('Do Not Create File')
+  #OROF('Create None')
+  SELF.Create = 0
+  #ENDCASE
+  SELF.LockRecover = %LockRecoverTime
+  #FOR (%Key)
+  SELF.AddKey(%Key,'%(CHOOSE(%KeyDescription<>'',%KeyDescription,%Key))',%(INLIST(%KeyAuto,%KeyField)))
+  #ENDFOR
+  #IF(%OverrideLazyOpen='Use Default')
+    #IF(~%DefaultLazyOpen)
+  SELF.LazyOpen = False
+    #ENDIF
+  #ELSIF(%OverrideLazyOpen='No')
+  SELF.LazyOpen = False
+  #ENDIF
+  Access:%File &= SELF
+
+Hide:Access:%File.Kill PROCEDURE
+  CODE
+  PARENT.Kill
+  Access:%File &= NULL
+#ENDFOR
+#FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+
+Hide:Relate:%File.Init PROCEDURE
+  CODE
+  Hide:Access:%File.Init
+  #SET(%LogoutDesired,%False)
+  #IF(%OverrideRILogout = 'Use Default' OR NOT %OverrideRILogout)
+    #IF(%DefaultRILogout)
+      #SET(%LogoutDesired,%True)
+    #ENDIF
+  #ELSIF(%OverrideRILogout = 'Yes')
+    #SET(%LogoutDesired,%True)
+  #ENDIF
+  PARENT.Init(Access:%File,%LogoutDesired)
+  #IF (%FileType = 'ALIAS')
+  SELF.SetAlias(Relate:%AliasFile)
+  #ENDIF
+  #SET(%RelateCnt,0)
+  #SET(%Cnt,0)
+  #FOR(%Relation),WHERE(%ThisFileIsUsed(%Relation) OR %RelationConstraintUpdate OR %RelationConstraintDelete)
+    #SET(%Cnt,%Cnt+1)
+  #ENDFOR
+  #IF(%Cnt)
+    #SET(%RelateCnt,((%Cnt-1)/%RelatesPerRoutine)+1)
+  #ENDIF
+  #LOOP,FOR(%Cnt,1,%RelateCnt)
+  DO AddRelations_%Cnt
+  #ENDLOOP
+  #SET(%Cnt,0)
+  #SET(%RelateCnt,1)
+  #FOR(%Relation),WHERE(%ThisFileIsUsed(%Relation) OR %RelationConstraintUpdate OR %RelationConstraintDelete)
+    #SET(%Cnt,%Cnt+1)
+    #IF(%Cnt=1)
+
+AddRelations_%RelateCnt ROUTINE
+      #SET(%RelateCnt,%RelateCnt+1)
+    #ENDIF
+    #IF(%Cnt=%RelatesPerRoutine)
+      #SET(%Cnt,0)
+    #ENDIF
+    #IF (%RelationKey AND ( %FileRelationType = '1:MANY'  OR ~%FileKey ) )
+      #IF (%RelationConstraintUpdate)
+        #SET(%UpdateStrategy,'RI:' & %RelationConstraintUpdate)
+      #ELSE
+        #SET(%UpdateStrategy,'RI:None')
+      #ENDIF
+      #IF (%RelationConstraintDelete)
+        #SET(%DeleteStrategy,'RI:' & %RelationConstraintDelete)
+      #ELSE
+        #SET(%DeleteStrategy,'RI:None')
+      #ENDIF
+  SELF.AddRelation(Relate:%Relation,%UpdateStrategy,%DeleteStrategy,%RelationKey)
+      #FOR (%FileKeyField),WHERE(%FileKeyField)
+  SELF.AddRelationLink(%FileKeyField,%FileKeyFieldLink)
+      #ENDFOR
+      #CYCLE
+    #ENDIF
+  SELF.AddRelation(Relate:%Relation)
+  #ENDFOR
+
+Hide:Relate:%File.Kill PROCEDURE
+  CODE
+  Hide:Access:%File.Kill
+  PARENT.Kill
+  Relate:%File &= NULL
+#ENDFOR
+#FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed())
+  #CALL(%FixClassName,%FileManagerToUse())
+  #FOR(%pClassMethod)
+    #FOR(%pClassMethodPrototype),WHERE(%pClassMethodVirtual)
+      #SET(%ThisObjectName,'Hide:Access:'&%File)
+      #CALL(%SetupMethodCheck)
+#EMBED(%FileManagerDataSection,'File Manager Data Section'),%File,%pClassMethod,%pClassMethodPrototype,WHERE(%pClassMethodVirtual),PREPARE(,%FixClassName(%FileManagerToUse()))
+  #?CODE
+  #EMBED(%FileManagerCodeSection,'File Manager Executable Code Section'),%File,%pClassMethod,%pClassMethodPrototype,WHERE(%pClassMethodVirtual),PREPARE(,%FixClassName(%FileManagerToUse()))
+      #CALL(%CheckAddMethodPrototype,%FileManagerLine)
+    #ENDFOR
+  #ENDFOR
+#!
+  #CALL(%FixClassName,%RelationmanagerToUse())
+  #FOR(%pClassMethod)
+    #FOR(%pClassMethodPrototype),WHERE(%pClassMethodVirtual)
+      #SET(%ThisObjectName,'Hide:Relate:'&%File)
+      #CALL(%SetupMethodCheck)
+#EMBED(%RelationManagerDataSection,'Relation Manager Data Section'),%File,%pClassMethod,%pClassMethodPrototype,WHERE(%pClassMethodVirtual),PREPARE(,%FixClassName(%RelationManagerToUse()))
+#?%NULL
+  #?CODE
+  #EMBED(%RelationManagerCodeSection,'Relation Manager Code Section'),%File,%pClassMethod,%pClassMethodPrototype,WHERE(%pClassMethodVirtual),PREPARE(,%FixClassName(%RelationManagerToUse()))
+      #CALL(%CheckAddMethodPrototype,%RelationManagerLine)
+    #ENDFOR
+  #ENDFOR
+#ENDFOR
+#!
+#!-------------------------------------------------
+#!
+#!
+#!-------------------------------------------------
+#!
+#CLOSE('PBDY.$$$')
+#ENDSECTION
+#!--------------------------------
+#!CREATE('BC.$$$')
+  MEMBER('%Program')
+#FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+  #CALL(%FixClassName,%FileManagerToUse())
+  #ADD(%BCIncludeList,%RemovePath(%pClassIncFile))
+  #CALL(%FixClassName,%RelationManagerToUse())
+  #ADD(%BCIncludeList,%RemovePath(%pClassIncFile))
+#ENDFOR
+
+#FOR(%BCIncludeList)
+  INCLUDE('%(CLIP(%BCIncludeList))')
+#ENDFOR
+
+  MAP
+#!FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+%(%RemoveExt(%BCFilename)):DctInit    PROCEDURE
+%(%RemoveExt(%BCFilename)):DctKill    PROCEDURE
+%(%RemoveExt(%BCFilename)):FilesInit  PROCEDURE
+#!ENDFOR
+  END
+
+#FOR(%File),WHERE(INRANGE(INSTANCE(%File),%LowFileInstance,%HighFileInstance) AND %FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+  #FOR(%pClassName),WHERE(%pClassName=%FileManagerToUse())
+    #CALL(%MakeDeclr,22,%OOPConstruct,'Hide:Access:'&%File,'CLASS('&%pClassName&')')
+%OOPConstruct
+    #FOR(%FileManagerLine)
+%FileManagerLine
+    #ENDFOR
+%[20]NULL END
+  #ENDFOR
+
+  #FOR(%pClassName),WHERE(%pClassName=%RelationManagerToUse())
+    #CALL(%MakeDeclr,22,%OOPConstruct,'Hide:Relate:'&%File,'CLASS('&%pClassName&')')
+%OOPConstruct
+    #FOR(%RelationManagerLine)
+%RelationManagerLine
+    #ENDFOR
+%[20]NULL END
+  #ENDFOR
+
+#ENDFOR
+#APPEND('PBDY.$$$'),SECTION
+#REMOVE('PBDY.$$$')
+#SET(%LowFileInstance,%HighFileInstance+1)
+#!
+#!
+#GROUP(%MakeMainBCFilename),AUTO
+#EQUATE(%BCFName,SLICE(%Program,1,INSTRING('.',%Program,1,1)-1))
+#RETURN(UPPER(CLIP(SUB(%BCFName,1,5)))&'BC.CLW')
+#!--------------------------------------------------------------------------
+#GROUP(%FileControlInitialize)
+#MESSAGE('Initializing File Control',3)
+#IF(%Primary)
+  #ADD(%ProcFilesUsed,%Primary)
+#ENDIF
+#FOR(%OtherFiles)
+  #ADD(%ProcFilesUsed,%OtherFiles)
+#ENDFOR
+#!--------------------------------------------------------------------------
+#GROUP(%FileControlSetFlags)
+#IF(%Primary)
+  #ADD(%UsedFile,%Primary)
+  #INSERT(%AddRelatedFiles,%UsedFile,%Primary)
+#ENDIF
+#FOR(%Secondary)
+  #ADD(%UsedFile,%Secondary)
+  #INSERT(%AddRelatedFiles,%UsedFile,%Secondary)
+#ENDFOR
+#FOR(%OtherFiles)
+  #ADD(%UsedFile,%OtherFiles)
+  #INSERT(%AddRelatedFiles,%UsedFile,%OtherFiles)
+#ENDFOR
+#!--------------------------------------------------------------------------
+#!--------------------------------------------------------------------------
+#GROUP(%AddRelatedFiles,*%OpenList,%FileJustOpened),PRESERVE
+#FIX(%File,%FileJustOpened)
+#FOR (%Relation),WHERE(%RelationConstraintDelete OR %RelationConstraintUpdate)
+  #IF(~INLIST(%Relation,%OpenList))
+    #ADD(%OpenList,%Relation)
+    #INSERT(%AddRelatedFiles,%OpenList,%Relation)
+  #ENDIF
+#ENDFOR
+#!--------------------------------------------------------------------------
+#GROUP(%FileControlCloseFile,%CurrentFile)
+Relate:%CurrentFile.Close
+#!
+#GROUP(%FileIsExternal)
+#IF(%OverrideExternal='Use Default')
+  #IF(%DefaultExternal='All External')
+    #RETURN(%True)
+  #ENDIF
+#ELSE
+  #IF(%OverrideExternal='External')
+    #RETURN(%True)
+  #ENDIF
+#ENDIF
+#RETURN(%False)
+#!
+#!
+#GROUP(%BCModulesNeeded),AUTO,PRESERVE
+#DECLARE(%Cnt,LONG)
+#EQUATE(%RVal,1)
+#FOR(%File),WHERE(%FileIsUsed() AND ~(%FileIsExternal() OR %GlobalExternal))
+  #SET(%Cnt,%Cnt+1)
+  #IF(%Cnt=%FilesPerBCModule)
+    #SET(%RVal,%RVal+1)
+    #SET(%Cnt,0)
+  #ENDIF
+#ENDFOR
+#RETURN(%RVal)
+#!
+#!
+#GROUP(%MakeBCFilename,%ModuleNumber),AUTO
+#EQUATE(%ModuleID,'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+#EQUATE(%BCFName,SLICE(%Program,1,INSTRING('.',%Program,1,1)-1))
+#EQUATE(%RVal,UPPER(CLIP(SUB(%BCFName,1,5))))
+#RETURN(%Rval&'BC'&SUB(%ModuleID,%ModuleNumber,1)&'.CLW')
+#!
+#!
+#GROUP(%RemoveExt,%MagicFilename),AUTO
+#EQUATE(%i,INSTRING('.',%MagicFilename,1,1))
+#IF(%i)
+  #RETURN(SLICE(%MagicFilename,1,%i-1))
+#ENDIF
+#RETURN(%MagicFilename)
+#!
+#!
+#GROUP(%FileIsUsed)
+#IF(%OverrideGenerate)
+  #RETURN(%True)
+#ELSE
+  #IF(%DefaultGenerate)
+    #RETURN(%True)
+  #ELSE
+    #IF(INLIST(%File,%UsedFile))
+      #RETURN(%True)
+    #ENDIF
+  #ENDIF
+#END
+#IF(%DefaultExport OR %OverrideExport)
+  #RETURN(%True)
+#ENDIF
+#RETURN(%False)
+#!
+#GROUP(%ThisFileIsUsed,%ToCheck),PRESERVE
+#FIX(%File,%ToCheck)
+#RETURN(%FileIsUsed())
+#!
+#!-------------------------------------------------------------------------
+#GROUP(%StandardSecondaryLookups),AUTO
+#MESSAGE('Secondary Lookups',3)
+#DECLARE(%MatchedKey)
+#DECLARE(%ParentKey)
+#DECLARE(%ChildKey)
+#FOR(%Secondary)
+  #FIX(%File,%Secondary)
+  #FIX(%Relation,%SecondaryTo)
+  #IF(%FileRelationType = '1:MANY')
+    #FOR(%RelationKeyField),WHERE(%RelationKeyFieldLink AND %RelationKeyField)
+%RelationKeyFieldLink = %RelationKeyField  #<! Assign linking field value
+    #ENDFOR
+Access:%File.Fetch(%FileKey)
+  #ELSIF(%FileRelationType = 'MANY:1')
+    #SET(%MatchedKey,%True)
+    #SUSPEND
+    #FOR(%RelationKeyField)
+      #IF(%RelationKeyFieldLink AND %RelationKeyField)
+#?%RelationKeyFieldLink = %RelationKeyField  #<! Assign linking field value
+      #ELSE
+        #SET(%MatchedKey,%False)
+      #ENDIF
+    #ENDFOR
+    #IF(%MatchedKey)
+      #SET(%ParentKey,%RelationKey)
+      #SET(%ChildKey,%FileKey)
+Access:%File.Fetch(%FileKey)
+      #FIND(%Key,%ParentKey)
+      #IF(NOT %KeyDuplicate)
+        #FIND(%Key,%ChildKey)
+        #IF(NOT %KeyDuplicate)
+          #RELEASE
+        #ENDIF
+      #ENDIF
+    #ENDIF
+    #RESUME
+  #ENDIF
+#ENDFOR
+#EMBED(%LookupRelated,'Lookup Related Records'),HLP('TPLEmbedLookupRelated'),LEGACY

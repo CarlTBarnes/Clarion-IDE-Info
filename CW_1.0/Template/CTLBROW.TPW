@@ -1,0 +1,1426 @@
+#CONTROL(BrowseBox,'File-Browsing List Box'),PRIMARY('File-Browsing List Box'),DESCRIPTION('Browse on ' & %Primary),MULTI,WINDOW,HLP('~TPLControlBrowseBox')
+  CONTROLS
+    LIST,AT(,,150,100),USE(?List),IMM,FROM(Queue:Browse),MSG('Browsing Records')
+  END
+#LOCALDATA
+RecordFiltered       LONG
+#ENDLOCALDATA
+#BOXED('Browse Box Prompts')
+  #PROMPT('&Locator:',DROP('None|Step|Entry|Incremental')),%LocatorType,DEFAULT('Step')
+  #PROMPT('&Quick-Scan Records',CHECK),%EnableQuickScan,DEFAULT(1)
+  #BUTTON('"Hot" Fields'),MULTI(%HotFields,%HotField),AT(10,33),HLP('~TPLControlBrowseBox')
+    #PROMPT('Hot Field:',FIELD),%HotField
+  #ENDBUTTON
+  #BUTTON('Range and Filter'),AT(100),HLP('~TPLControlBrowseBox')
+    #PROMPT('&Record Filter:',@S255),%RecordFilter
+    #PROMPT('Range Limit &Field:',COMPONENT(%PrimaryKey)),%RangeField
+    #ENABLE(%RangeField)
+      #PROMPT('Range Limit &Type:',DROP('Current Value|Single Value|Range of Values|File Relationship')),%RangeLimitType,DEFAULT('Current Value')
+      #BOXED('Range Limit Boundary'),WHERE(%RangeLimitType='Single Value'),AT(,45)
+        #PROMPT('&Range Limit Value:',FIELD),%RangeLimit
+      #ENDBOXED
+      #BOXED('Range Limit Boundaries'),WHERE(%RangeLimitType='Range of Values'),AT(,45)
+        #PROMPT('&Low Limit Value:',FIELD),%RangeLow
+        #PROMPT('&High Limit Value:',FIELD),%RangeHigh
+      #ENDBOXED
+      #BOXED('Range Limiting File'),WHERE(%RangeLimitType='File Relationship'),AT(,45)
+        #PROMPT('&Related File:',FILE),%RangeFile
+      #ENDBOXED
+    #ENDENABLE
+  #ENDBUTTON
+  #BUTTON('Browse Totaling'),MULTI(%BrowseTotals,%BrowseTotalTarget & ' (' & %BrowseTotalType & ')'),AT(10),HLP('~TPLControlBrowseBox')
+    #PROMPT('Total Target Field:',FIELD),%BrowseTotalTarget,REQ
+    #PROMPT('Total Type:',DROP('Count|Sum|Average')),%BrowseTotalType
+    #ENABLE(%BrowseTotalType <> 'Count'),CLEAR
+      #PROMPT('Field To Total:',FIELD),%BrowseTotalField,REQ
+    #ENDENABLE
+    #PROMPT('Total Based On:',DROP('Each Record Read|Specified Condition')),%BrowseTotalBasedOn
+    #ENABLE(%BrowseTotalBasedOn = 'Specified Condition'),CLEAR
+      #PROMPT('Total Condition:',@S255),%BrowseTotalCondition,REQ
+    #ENDENABLE
+  #ENDBUTTON
+  #BUTTON('Vertical Scroll Behavior'),AT(100),HLP('~TPLControlBrowseBox')
+    #PROMPT('Scroll Bar Behavior:',DROP('Fixed Thumb|Movable Thumb')),%ScrollBehavior,DEFAULT('Fixed Thumb')
+    #ENABLE(%ScrollBehavior='Movable Thumb')
+      #PROMPT('Key Distribution:',DROP('Alpha|Last Names|Custom|Runtime')),%ScrollKeyDistribution,DEFAULT('Alpha')
+      #ENABLE(%ScrollKeyDistribution='Custom')
+        #BUTTON('Custom Key Distribution'),MULTI(%CustomKeyDistribution,%KeyDistributionValue),AT(10,,180),HLP('~TPLControlBrowseBox')
+          #PROMPT('Key Value:',@S10),%KeyDistributionValue
+        #ENDBUTTON
+      #ENDENABLE
+    #ENDENABLE
+  #ENDBUTTON
+#ENDBOXED
+#CLASS('Before Filter',%ActiveTemplateInstanceDescription & ' - Validate Record before Filter Code')
+#CLASS('Before Range Limits',%ActiveTemplateInstanceDescription & ' - Validate Record before Range Limit Code')
+#CLASS('Format Browse','Format a variable in the ' & %ActiveTemplateInstanceDescription)
+#ATSTART
+#MESSAGE('Initializing Browse',3)
+#INSERT(%FileControlInitialize)
+#DECLARE(%VerticalScrollBarFound)
+#DECLARE(%VerticalScrollBehavior)
+#DECLARE(%VerticalElementCount)
+#DECLARE(%VerticalRuntimeType)
+#DECLARE(%ListControl)
+#DECLARE(%ListQueue)
+#DECLARE(%QueueField),MULTI
+#DECLARE(%QueueFieldAssignment,%QueueField)
+#DECLARE(%ActiveFile),UNIQUE
+#DECLARE(%ActiveMemoExists,%ActiveFile)
+#DECLARE(%ActiveMemoHot,%ActiveFile)
+#DECLARE(%InstancePrefix)
+#DECLARE(%LocatorName)
+#DECLARE(%LocatorField)
+#DECLARE(%LocatorControl)
+#DECLARE(%PreListEntry)
+#DECLARE(%FreeElement)
+#DECLARE(%FreeElementFound)
+#!
+#! Determine the Locator Field
+#!
+#FREE(%ActiveFile)
+#FIX(%File,%Primary)
+#FIX(%Key,%PrimaryKey)
+#SET(%InstancePrefix,'BRW' & %ActiveTemplateInstance & ':')
+#SET(%VerticalScrollBarFound,%False)
+#FOR(%Control),WHERE(%ControlInstance = %ActiveTemplateInstance)
+  #SET(%ListControl,%Control)
+  #FOR(%ControlField)
+    #ADD(%QueueField,%InstancePrefix & ':' & %ControlField)
+    #SET(%QueueFieldAssignment,%ControlField)
+  #ENDFOR
+  #SET(%ListQueue,EXTRACT(%ControlStatement,'FROM'))
+  #SET(%ListQueue,SUB(%ListQueue,6,LEN(%ListQueue)-6))
+  #IF(EXTRACT(%ControlStatement,'VSCROLL'))
+    #SET(%VerticalScrollBarFound,%True)
+  #ELSIF(EXTRACT(%ControlStatement,'HVSCROLL'))
+    #SET(%VerticalScrollBarFound,%True)
+  #ENDIF
+#ENDFOR
+#FOR(%HotFields)
+  #SET(%ValueConstruct,%InstancePrefix & ':' & %HotField)
+  #FIX(%QueueField,%ValueConstruct)
+  #IF(%QueueField <> %ValueConstruct)
+    #ADD(%QueueField,%ValueConstruct)
+    #SET(%QueueFieldAssignment,%HotField)
+  #ENDIF
+#ENDFOR
+#FOR(%KeyField)
+  #SET(%ValueConstruct,%InstancePrefix & ':' & %KeyField)
+  #FIX(%QueueField,%ValueConstruct)
+  #IF(%QueueField <> %ValueConstruct)
+    #ADD(%QueueField,%ValueConstruct)
+    #SET(%QueueFieldAssignment,%KeyField)
+  #ENDIF
+#ENDFOR
+#FIX(%Key,%FilePrimaryKey)
+#FOR(%KeyField)
+  #SET(%ValueConstruct,%InstancePrefix & ':' & %KeyField)
+  #FIX(%QueueField,%ValueConstruct)
+  #IF(%QueueField <> %ValueConstruct)
+    #ADD(%QueueField,%ValueConstruct)
+    #SET(%QueueFieldAssignment,%KeyField)
+  #ENDIF
+#ENDFOR
+#SET(%VerticalScrollBehavior,%Null)
+#IF(%VerticalScrollBarFound)
+  #IF(%ScrollBehavior = 'Movable Thumb')
+    #IF(%ScrollKeyDistribution = 'Runtime')
+      #SET(%VerticalScrollBehavior,'Runtime')
+      #SET(%VerticalElementCount,100)
+    #ELSIF(%ScrollKeyDistribution = 'Custom')
+      #SET(%VerticalScrollBehavior,'Custom')
+      #SET(%VerticalElementCount,ITEMS(%CustomKeyDistribution))
+    #ELSE
+      #SET(%VerticalScrollBehavior,'Standard')
+      #SET(%VerticalElementCount,100)
+    #ENDIF
+  #ELSE
+    #SET(%VerticalScrollBehavior,'Fixed')
+  #ENDIF
+#ENDIF
+#FIX(%Key,%PrimaryKey)
+#DECLARE(%ValidRangeKey)
+#SET(%ValidRangeKey,%Null)
+#IF(%RangeField)
+  #FOR(%KeyField)
+    #SET(%FreeElement,%KeyField)
+    #IF(%ValidRangeKey)
+      #BREAK
+    #ENDIF
+    #IF(UPPER(%KeyField)=UPPER(%RangeField))
+      #SET(%ValidRangeKey,%True)
+    #ENDIF
+  #ENDFOR
+  #IF(%ValidRangeKey=%Null)
+    #ERROR(%Procedure & ' Range Error: The range field is not in the primary key!')
+  #ENDIF
+  #CASE(%RangeLimitType)
+  #OF('Single Value')
+    #IF(NOT %RangeLimit)
+      #ERROR(%Procedure & ' Range Error: The limiting field could not be found!')
+    #ENDIF
+  #OF('Range of Values')
+    #IF(NOT %RangeLow)
+      #ERROR(%Procedure & ' Range Error: The low limiting field could not be found!')
+    #ENDIF
+    #IF(NOT %RangeHigh)
+      #ERROR(%Procedure & ' Range Error: The high limiting field could not be found!')
+    #ENDIF
+  #OF('File Relationship')
+    #FIX(%File,%Primary)
+    #FIX(%Relation,%RangeFile)
+    #IF(NOT %Relation)
+      #ERROR(%Procedure & ' Range Error: The limiting relationship could not be found!')
+    #ENDIF
+  #ENDCASE
+#ENDIF
+#FIX(%File,%Primary)
+#FIX(%Key,%PrimaryKey)
+#SET(%LocatorName,%Null)
+#IF(%LocatorType <> 'None')
+  #IF(%RangeField)
+    #FOR(%KeyField)
+      #IF(%LocatorName)
+        #IF(%RangeLimitType <> 'Range of Values')
+          #SET(%LocatorName,%KeyField)
+        #ENDIF
+        #BREAK
+      #ELSE
+        #IF(UPPER(%KeyField)=UPPER(%RangeField))
+          #SET(%LocatorName,%KeyField)
+        #ENDIF
+      #ENDIF
+    #ENDFOR
+  #ELSE
+    #FOR(%KeyField)
+      #SET(%LocatorName,%KeyField)
+      #BREAK
+    #ENDFOR
+  #ENDIF
+  #IF(%LocatorType = 'Entry' OR %LocatorType = 'Incremental')
+    #FOR(%Control)
+      #IF(UPPER(%ControlUse)=UPPER(%LocatorName))
+        #SET(%LocatorControl,%Control)
+        #BREAK
+      #ENDIF
+    #ENDFOR
+  #ENDIF
+  #IF(%LocatorName=%Null)
+    #ERROR(%Procedure & ' Locator Error: A free key element could not be found!  Locator reset to "None"!')
+    #SET(%LocatorType,'None')
+  #ELSIF(%LocatorControl = %Null AND %LocatorType = 'Entry')
+    #ERROR(%Procedure & ' Locator Error: Locator entry control (' & %LocatorName & ') not found.  Locator reset to "Step"')
+    #SET(%LocatorType,'Step')
+  #ENDIF
+  #IF(%LocatorName)
+    #SET(%FreeElement,%LocatorName)
+  #ENDIF
+#ENDIF
+#IF(%FreeElement=%Null)
+  #FOR(%KeyField)
+    #SET(%FreeElement,%KeyField)
+    #FIX(%Field,%KeyField)
+    #SET(%VerticalRuntimeType,%FieldType)
+    #BREAK
+  #ENDFOR
+#ELSE
+  #FIX(%Field,%FreeElement)
+  #SET(%VerticalRuntimeType,%FieldType)
+#ENDIF
+#!
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%DataSectionBeforeWindow)
+  #MESSAGE('BrowseBox Control Declarations',3)
+%[20]ListQueue QUEUE                            #<! Browsing Queue
+  #FOR(%QueueField)                             #! FOR each field in list
+    #FIND(%Field,%QueueFieldAssignment)         #! FIND Field to control field
+    #IF(%FieldType = 'GROUP')                   #! IF component is a group
+%[22]QueueField LIKE(%QueueFieldAssignment),PRE(%InstancePrefix) #<! Queue Display field
+    #ELSE                                       #! ELSE (component NOT a group)
+%[22]QueueField LIKE(%QueueFieldAssignment) #<! Queue Display field
+    #ENDIF                                      #! END (IF component is a group)
+    #ADD(%ActiveFile,%FieldFile)
+    #IF(%FieldType = 'MEMO')
+      #SET(%ActiveMemoHot,%True)
+    #ENDIF
+  #ENDFOR                                       #! END (FOR each field in list)
+  #FOR(%ActiveFile)
+    #FIX(%File,%ActiveFile)
+    #FOR(%Field),WHERE(%FieldType='MEMO')
+      #SET(%ActiveMemoExists,%True)
+    #ENDFOR
+  #ENDFOR
+  #SET(%ValueConstruct,%InstancePrefix & ':Position')
+%[22]ValueConstruct STRING(255)                 #<! Queue POSITION information
+  #SET(%ValueConstruct,%InstancePrefix & ':Mark')
+%[22]ValueConstruct BYTE                        #<! Queue POSITION information
+                     END                        #<! END (Browsing Queue)
+  #FIX(%File,%Primary)
+  #FIX(%Key,%PrimaryKey)
+  #IF(%RangeField AND %RangeLimitType <> 'File Relationship')
+    #FOR(%KeyField)
+      #IF(UPPER(%KeyField)=UPPER(%RangeField))
+        #IF(%RangeLimitType <> 'Current Value')
+          #BREAK
+        #ENDIF
+      #ENDIF
+      #FIX(%Field,%KeyField)                        #! Fix to component of key
+      #SET(%ValueConstruct,%InstancePrefix & ':Save:' & %KeyField)
+      #IF(%FieldType = 'GROUP')                     #! IF component is a group
+%[20]ValueConstruct LIKE(%KeyField),PRE(SAV)        #<! Save Range Limit Group
+      #ELSE                                         #! Else component NOT a group
+%[20]ValueConstruct LIKE(%KeyField)                 #<! Save Range Limit Field
+      #ENDIF                                        #! EndIf component is a group
+      #IF(UPPER(%KeyField)=UPPER(%RangeField))
+        #BREAK
+      #ENDIF
+    #ENDFOR
+  #ENDIF
+  #IF(%EnableQuickScan)
+    #SET(%ValueConstruct,%InstancePrefix & ':QuickScan')
+%[20]ValueConstruct BYTE                         #<! Flag for Range/Filter test
+  #ENDIF
+  #IF(%LocatorType='Incremental')
+    #SET(%ValueConstruct,%InstancePrefix & ':LocatorValue')
+%[20]ValueConstruct STRING(SIZE(%LocatorName))   #<! Flag for Range/Filter test
+    #SET(%ValueConstruct,%InstancePrefix & ':LocatorLength')
+%[20]ValueConstruct BYTE                         #<! Flag for Range/Filter test
+    #SET(%ValueConstruct,%InstancePrefix & ':ShiftState')
+%[20]ValueConstruct BYTE
+  #ELSIF(%LocatorType='Entry')
+    #SET(%ValueConstruct,%InstancePrefix & ':LocatorValue')
+%[20]ValueConstruct STRING(SIZE(%LocatorName))   #<! Flag for Range/Filter test
+  #ENDIF
+  #SET(%ValueConstruct,%InstancePrefix & ':RecordStatus')
+%[20]ValueConstruct BYTE                         #<! Flag for Range/Filter test
+  #SET(%ValueConstruct,%InstancePrefix & ':InitializePage')
+%[20]ValueConstruct BYTE                         #<! Flag for Range/Filter test
+  #SET(%ValueConstruct,%InstancePrefix & ':ItemsToFill')
+%[20]ValueConstruct LONG                         #<! Controls records retrieved
+  #SET(%ValueConstruct,%InstancePrefix & ':MaxItemsInList')
+%[20]ValueConstruct LONG                         #<! Retrieved after window opened
+  #SET(%ValueConstruct,%InstancePrefix & ':LocatedPosition')
+%[20]ValueConstruct STRING(255)                  #<! POSITION of located record
+  #SET(%ValueConstruct,%InstancePrefix & ':QueuePointer')
+%[20]ValueConstruct LONG                         #<! Queue position of located record
+  #SET(%ValueConstruct,%InstancePrefix & ':NextChoice')
+%[20]ValueConstruct LONG                         #<! Queue position of located record
+  #SET(%ValueConstruct,%InstancePrefix & ':NewSelectPosted')
+%[20]ValueConstruct BYTE                         #<! Queue position of located record
+  #FOR(%BrowseTotals)
+    #CASE(%BrowseTotalType)
+    #OF('Count')
+      #SET(%ValueConstruct,%InstancePrefix & ':' & %BrowseTotalTarget & ':Cnt:Value')
+%[20]ValueConstruct LONG                         #<! Queue position of scroll thumb
+      #SET(%ValueConstruct,%InstancePrefix & ':' & %BrowseTotalTarget & ':Cnt:Temp')
+%[20]ValueConstruct LONG                         #<! Queue position of scroll thumb
+    #OF('Sum')
+      #SET(%ValueConstruct,%InstancePrefix & ':' & %BrowseTotalTarget & ':Sum:Value')
+%[20]ValueConstruct REAL                         #<! Queue position of scroll thumb
+      #SET(%ValueConstruct,%InstancePrefix & ':' & %BrowseTotalTarget & ':Sum:Temp')
+%[20]ValueConstruct REAL                         #<! Queue position of scroll thumb
+    #OF('Average')
+      #SET(%ValueConstruct,%InstancePrefix & ':' & %BrowseTotalTarget & ':Cnt:Value')
+%[20]ValueConstruct LONG                         #<! Queue position of scroll thumb
+      #SET(%ValueConstruct,%InstancePrefix & ':' & %BrowseTotalTarget & ':Cnt:Temp')
+%[20]ValueConstruct LONG                         #<! Queue position of scroll thumb
+      #SET(%ValueConstruct,%InstancePrefix & ':' & %BrowseTotalTarget & ':Sum:Value')
+%[20]ValueConstruct REAL                         #<! Queue position of scroll thumb
+      #SET(%ValueConstruct,%InstancePrefix & ':' & %BrowseTotalTarget & ':Sum:Temp')
+%[20]ValueConstruct REAL                         #<! Queue position of scroll thumb
+    #ENDCASE
+  #ENDFOR
+  #IF(%VerticalScrollBehavior)
+    #SET(%ValueConstruct,%InstancePrefix & ':CurrentScroll')
+%[20]ValueConstruct BYTE                         #<! Queue position of scroll thumb
+    #SET(%ValueConstruct,%InstancePrefix & ':CurrentScrollRecord')
+%[20]ValueConstruct LONG                         #<! Queue position of scroll thumb
+    #IF(%ScrollKeyDistribution='Custom')
+      #SET(%ValueConstruct,%InstancePrefix & ':KeyDistribution')
+%[20]ValueConstruct STRING(10),DIM(%VerticalElementCount)
+    #ELSIF(%VerticalScrollBehavior = 'Runtime')
+      #CASE(%VerticalRuntimeType)
+      #OF('STRING')
+      #OROF('CSTRING')
+      #OROF('PSTRING')
+      #OROF('GROUP')
+        #SET(%VerticalRuntimeType,'STRING')
+        #SET(%ValueConstruct,%InstancePrefix & ':ScrollBuildQueue')
+%[20]ValueConstruct QUEUE                        #<! Queue position of scroll thumb
+%[22]Null STRING(10)
+%[20]Null END
+        #SET(%ValueConstruct,%InstancePrefix & ':KeyDistribution')
+%[20]ValueConstruct STRING(10),DIM(%VerticalElementCount)
+      #ELSE
+        #SET(%VerticalRuntimeType,'REAL')
+        #SET(%ValueConstruct,%InstancePrefix & ':KeyDistribution')
+%[20]ValueConstruct REAL,DIM(%VerticalElementCount)
+      #ENDCASE
+      #SET(%ValueConstruct,%InstancePrefix & ':ScrollSeparation')
+%[20]ValueConstruct REAL                         #<! Queue position of scroll thumb
+      #SET(%ValueConstruct,%InstancePrefix & ':CurrentScrollSeparation')
+%[20]ValueConstruct REAL                         #<! Queue position of scroll thumb
+      #SET(%ValueConstruct,%InstancePrefix & ':ScrollRecordCount')
+%[20]ValueConstruct LONG                         #<! Queue position of scroll thumb
+    #ENDIF
+  #ENDIF
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%BeforeAccept)
+#INSERT(%BrowseBoxLimitCode,'Set')
+%ListControl{Prop:Alrt,251} = MouseLeft2
+  #IF(%VerticalScrollBehavior='Custom')
+    #FOR(%CustomKeyDistribution)
+      #SET(%ValueConstruct,INSTANCE(%CustomKeyDistribution))
+%InstancePrefix:KeyDistribution[%ValueConstruct]=%KeyDistributionValue
+    #ENDFOR
+  #ENDIF
+  #IF(%LocatorType='Incremental')
+%ListControl{Prop:Alrt,250} = BSKey
+%ListControl{Prop:Alrt,249} = SpaceKey
+  #ENDIF
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'NewSelection')
+DO %InstancePrefix:NewSelection
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'ScrollUp')
+DO %InstancePrefix:ScrollUp
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'ScrollDown')
+DO %InstancePrefix:ScrollDown
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'PageUp')
+DO %InstancePrefix:PageUp
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'ScrollDrag')
+  #IF(%VerticalScrollBehavior)
+IF %ListControl{Prop:VScrollPos} <= 1
+  POST(Event:ScrollTop,%ListControl)
+ELSIF %ListControl{Prop:VScrollPos} = 100
+  POST(Event:ScrollBottom,%ListControl)
+ELSE
+    #CASE(%VerticalScrollBehavior)
+    #OF('Fixed')
+  CYCLE
+    #OF('Standard')
+      #IF(%ScrollKeyDistribution = 'Alpha')
+  %FreeElement = Sort:Alpha:Array[%ListControl{Prop:VScrollPos}]
+  DO %InstancePrefix:LocateRecord
+      #ELSE
+  %FreeElement = Sort:Name:Array[%ListControl{Prop:VScrollPos}]
+  DO %InstancePrefix:LocateRecord
+      #ENDIF
+    #ELSE
+  %InstancePrefix:CurrentScrollRecord = (%VerticalElementCount * %ListControl{Prop:VScrollPos})/100
+  %FreeElement = %InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScrollRecord]
+  DO %InstancePrefix:LocateRecord
+    #ENDCASE
+END
+  #ENDIF
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'PageDown')
+DO %InstancePrefix:PageDown
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'ScrollTop')
+DO %InstancePrefix:ScrollTop
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'ScrollBottom')
+DO %InstancePrefix:ScrollBottom
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%ListControl,'AlertKey')
+DO %InstancePrefix:AlertKey
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ControlEventHandling,%LocatorControl,'Accepted')
+IF RECORDS(%ListQueue) AND %LocatorName
+  UPDATE(%LocatorControl)
+  GET(%Primary,0)
+  DO %InstancePrefix:LocateRecord
+  DO %InstancePrefix:FillBuffer
+  #IF(%LocatorType = 'Incremental')
+  %InstancePrefix:LocatorValue = %LocatorName
+  %InstancePrefix:LocatorLength = LEN(CLIP(%LocatorName))
+  #ENDIF
+  DO RefreshWindow
+  IF NOT %InstancePrefix:NewSelectPosted
+    %InstancePrefix:NewSelectPosted = True
+    POST(Event:NewSelection,%ListControl)
+  END
+END
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%WindowInitializationCode)
+DO %InstancePrefix:OpenWindow
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%RefreshWindowAfterLookup)
+#EMBED(%BeforeControlRefresh,'Before Refresh Window for a control'),%Control
+IF NOT ForceRefresh
+  IF RECORDS(%ListQueue)
+    GET(%ListQueue,CHOICE(%ListControl))
+    DO %InstancePrefix:FillBuffer
+    DO %InstancePrefix:ValidateRecord
+    IF %InstancePrefix:RecordStatus <> Record:OK
+      FREE(%ListQueue)
+      DO %InstancePrefix:InitializeBrowse
+    END
+  ELSE
+    DO %InstancePrefix:InitializeBrowse
+  END
+ELSE
+  DO %InstancePrefix:InitializeBrowse
+  DO %InstancePrefix:RefreshPage
+END
+#EMBED(%AfterControlRefresh,'After Refresh Window for a control'),%Control
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%RefreshWindowBeforeDisplay)
+  #IF(%VerticalScrollBehavior)
+%ListControl{Prop:VScrollPos} = %InstancePrefix:CurrentScroll
+  #ENDIF
+  #IF(%LocatorControl)
+    #IF(%LocatorType = 'Entry')
+%InstancePrefix:LocatorValue = %LocatorName
+CLEAR(%LocatorName)
+    #ELSIF(%LocatorType = 'Incremental')
+%LocatorName = %InstancePrefix:LocatorValue
+    #ENDIF
+  #ENDIF
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%SyncWindowAfterLookup)
+IF RECORDS(%ListQueue)
+  GET(%ListQueue,CHOICE(%ListControl))
+  REGET(%PrimaryKey,%InstancePrefix:Position)
+END
+#ENDAT
+#!-------------------------------------------------------------------------
+#AT(%ProcedureRoutines)
+  #MESSAGE('BrowseBox Control Routine',3)
+  #FIX(%File,%Primary)
+  #FIX(%Key,%PrimaryKey)
+!----------------------------------------------------------------------
+%InstancePrefix:OpenWindow ROUTINE
+  IF LocalRequest = SelectRecord
+    SET(%Key,%Key)
+    DO %InstancePrefix:LocateRecord
+  ELSE
+    DO %InstancePrefix:InitializeBrowse
+    SELECT(%ListControl,1)
+  END
+  DO %InstancePrefix:FillBuffer
+  IF NOT %InstancePrefix:NewSelectPosted
+    %InstancePrefix:NewSelectPosted = True
+    POST(Event:NewSelection,%ListControl)
+  END
+!----------------------------------------------------------------------
+%InstancePrefix:InitializeBrowse ROUTINE
+  #IF(%EnableQuickScan)
+  #EMBED(%BeforeTurnQuickScanOn,'Before Turning QuickScan On'),WHERE(%EnableQuickScan)
+  IF SEND(%Primary,'QUICKSCAN=on').
+  #EMBED(%AfterTurnQuickScanOn,'After Turning QuickScan On'),WHERE(%EnableQuickScan)
+  #ENDIF
+  #EMBED(%StartInitializeBrowseRoutine,'Start of Initialize Browse ROUTINE'),HIDE
+  #SUSPEND
+    #IF(%VerticalScrollBehavior='Runtime')
+      #IF(%VerticalRuntimeType = 'STRING')
+  FREE(%InstancePrefix:ScrollBuildQueue)
+      #ENDIF
+    #ENDIF
+  #?SETCURSOR(Cursor:Wait)
+  #?DO %InstancePrefix:ResetLow
+    #FOR(%BrowseTotals)
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+  %InstancePrefix:%BrowseTotalTarget:Cnt:Value = 0
+      #OF('Sum')
+  %InstancePrefix:%BrowseTotalTarget:Sum:Value = 0
+      #OF('Average')
+  %InstancePrefix:%BrowseTotalTarget:Cnt:Value = 0
+  %InstancePrefix:%BrowseTotalTarget:Sum:Value = 0
+      #ENDCASE
+    #ENDFOR
+  #EMBED(%BeforeTotalLoop,'Before Browse Total Loop'),WHERE(ITEMS(%BrowseTotals)),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+  #?LOOP
+    #FIX(%File,%Primary)
+    #IF(%ActiveMemoExists)
+    #?NOMEMO(%Primary)
+    #ENDIF
+    #?NEXT(%Primary)
+    #?IF ERRORCODE() THEN BREAK.
+    #?DO %InstancePrefix:ValidateRecord
+    #?EXECUTE(%InstancePrefix:RecordStatus)
+      #?BREAK
+      #?CYCLE
+    #?END
+    #IF(%VerticalScrollBehavior='Runtime')
+      #IF(%VerticalRuntimeType = 'STRING')
+    %InstancePrefix:ScrollBuildQueue = %FreeElement
+    ADD(%InstancePrefix:ScrollBuildQueue)
+      #ENDIF
+    #ENDIF
+    #?DO %InstancePrefix:FillQueue
+    #FOR(%BrowseTotals)
+      #IF(%BrowseTotalCondition)
+    IF (%BrowseTotalCondition)
+        #CASE(%BrowseTotalType)
+        #OF('Count')
+      %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+        #OF('Sum')
+      %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+        #OF('Average')
+      %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+      %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+        #ENDCASE
+    END
+      #ELSE
+        #CASE(%BrowseTotalType)
+        #OF('Count')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+        #OF('Sum')
+    %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+        #OF('Average')
+    %InstancePrefix:%BrowseTotalTarget:Cnt:Value += 1
+    %InstancePrefix:%BrowseTotalTarget:Sum:Value += %BrowseTotalField
+        #ENDCASE
+      #ENDIF
+    #ENDFOR
+    #EMBED(%TotalLoop,'Browse Total Loop'),WHERE(ITEMS(%BrowseTotals)),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+  #?END
+  #EMBED(%AfterTotalLoop,'After Browse Total Loop'),WHERE(ITEMS(%BrowseTotals)),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+    #FOR(%BrowseTotals)
+      #CASE(%BrowseTotalType)
+      #OF('Count')
+  %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Cnt:Value
+      #OF('Sum')
+  %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Sum:Value
+      #OF('Average')
+  %BrowseTotalTarget = %InstancePrefix:%BrowseTotalTarget:Sum:Value/%InstancePrefix:%BrowseTotalTarget:Cnt:Value
+      #ENDCASE
+    #ENDFOR
+  #?SETCURSOR()
+    #IF(%VerticalScrollBehavior='Runtime')
+      #IF(%VerticalRuntimeType = 'STRING')
+  %InstancePrefix:ScrollSeparation = RECORDS(%InstancePrefix:ScrollBuildQueue) / %VerticalElementCount
+  LOOP %InstancePrefix:CurrentScrollRecord = 2 TO %VerticalElementCount
+    IF RECORDS(%InstancePrefix:ScrollBuildQueue) > %VerticalElementCount
+      %InstancePrefix:QueuePointer = %InstancePrefix:CurrentScrollRecord * %InstancePrefix:ScrollSeparation
+      GET(%InstancePrefix:ScrollBuildQueue,%InstancePrefix:QueuePointer)
+      %InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScrollRecord-1] = %InstancePrefix:ScrollBuildQueue
+    ELSE
+      GET(%InstancePrefix:ScrollBuildQueue,%InstancePrefix:CurrentScrollRecord)
+      IF ERRORCODE()
+        %InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScrollRecord-1] = ' {10}'
+      ELSE
+        %InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScrollRecord-1] = %InstancePrefix:ScrollBuildQueue
+      END
+    END
+  END
+  FREE(%InstancePrefix:ScrollBuildQueue)
+      #ENDIF
+    #ENDIF
+  #RESUME
+  #IF(%VerticalScrollBehavior='Runtime')
+    #IF(%VerticalRuntimeType <> 'STRING')
+  DO %InstancePrefix:ResetHigh
+  LOOP
+    #IF(%ActiveMemoExists)
+    NOMEMO(%Primary)
+    #ENDIF
+    PREVIOUS(%Primary)
+    IF ERRORCODE() THEN BREAK.
+    DO %InstancePrefix:ValidateRecord
+    EXECUTE(%InstancePrefix:RecordStatus)
+      BREAK
+      CYCLE
+    END
+    BREAK
+  END
+  %InstancePrefix:ScrollRecordCount = %FreeElement
+  %InstancePrefix:KeyDistribution[%VerticalElementCount] = %FreeElement
+  DO %InstancePrefix:ResetLow
+  LOOP
+    #IF(%ActiveMemoExists)
+    NOMEMO(%Primary)
+    #ENDIF
+    NEXT(%Primary)
+    IF ERRORCODE() THEN BREAK.
+    DO %InstancePrefix:ValidateRecord
+    EXECUTE(%InstancePrefix:RecordStatus)
+      BREAK
+      CYCLE
+    END
+    %InstancePrefix:ScrollRecordCount -= %FreeElement
+    BREAK
+  END
+  %InstancePrefix:ScrollSeparation = %InstancePrefix:ScrollRecordCount/%VerticalElementCount
+  %InstancePrefix:KeyDistribution[1] = %FreeElement
+  LOOP %InstancePrefix:CurrentScroll = 2 TO %VerticalElementCount - 1
+    %InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScroll] = %InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScroll - 1] + %InstancePrefix:ScrollSeparation
+  END
+    #ENDIF
+  #ENDIF
+  #IF(%EnableQuickScan)
+  #EMBED(%BeforeTurnQuickScanOff,'Before Turning QuickScan Off'),WHERE(%EnableQuickScan)
+  IF SEND(%Primary,'QUICKSCAN=off').
+  #EMBED(%AfterTurnQuickScanOff,'After Turning QuickScan Off'),WHERE(%EnableQuickScan)
+  #ENDIF
+  DO %InstancePrefix:RefreshPage
+  #EMBED(%EndInitializeBrowseRoutine,'End of Initialize Browse ROUTINE'),HIDE
+!----------------------------------------------------------------------
+%InstancePrefix:FillBuffer ROUTINE
+  #EMBED(%StartFillBufferRoutine,'Start of Fill Buffer ROUTINE'),HIDE
+  #FOR(%QueueField)                           #! FOR each field in list
+  %QueueFieldAssignment = %QueueField
+  #ENDFOR
+  #EMBED(%EndFillBufferRoutine,'Start of Fill Buffer ROUTINE'),HIDE
+!----------------------------------------------------------------------
+%InstancePrefix:ResetLow ROUTINE
+  #INSERT(%BrowseBoxLimitCode,'Low')              #! Reset for last page access
+!----------------------------------------------------------------------
+%InstancePrefix:ResetHigh ROUTINE
+  #INSERT(%BrowseBoxLimitCode,'High')             #! Reset for last page access
+!----------------------------------------------------------------------
+%InstancePrefix:ResetClear ROUTINE
+  #INSERT(%BrowseBoxLimitCode,'Clear')           #! Reset for last page access
+!----------------------------------------------------------------------
+%InstancePrefix:FillQueue ROUTINE
+  #EMBED(%FormatBrowse,'Format an element of the browse queue'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+  #INSERT(%StandardFormula,'Format Browse')
+  #FOR(%QueueField)
+  %QueueField = %QueueFieldAssignment
+  #ENDFOR
+  %InstancePrefix:Position = POSITION(%PrimaryKey)
+!----------------------------------------------------------------------
+%InstancePrefix:NewSelection ROUTINE
+  %InstancePrefix:NewSelectPosted = False
+  IF RECORDS(%ListQueue)
+    DO %InstancePrefix:FillBuffer
+  #IF(%VerticalScrollBehavior AND %VerticalScrollBehavior <> 'Fixed')
+    #FIX(%File,%Primary)
+    #FIX(%Key,%PrimaryKey)
+    %InstancePrefix:CurrentScroll = 100
+    #IF(%VerticalScrollBehavior='Standard')
+    LOOP %InstancePrefix:CurrentScrollRecord = 1 TO 100
+      #IF(%ScrollKeyDistribution = 'Alpha')
+        #IF(%KeyNoCase)
+      IF Sort:Alpha:Array[%InstancePrefix:CurrentScrollRecord] => UPPER(%FreeElement)
+        #ELSE
+      IF Sort:Alpha:Array[%InstancePrefix:CurrentScrollRecord] => %FreeElement
+        #ENDIF
+      #ELSE
+        #IF(%KeyNoCase)
+      IF Sort:Name:Array[%InstancePrefix:CurrentScrollRecord] => UPPER(%FreeElement)
+        #ELSE
+      IF Sort:Name:Array[%InstancePrefix:CurrentScrollRecord] => %FreeElement
+        #ENDIF
+      #ENDIF
+    #ELSE
+    LOOP %InstancePrefix:CurrentScrollRecord = 1 TO %VerticalElementCount
+      #FIX(%File,%Primary)
+      #FIX(%Field,%FreeElement)
+      #CASE(%FieldType)
+      #OF('STRING')
+      #OROF('CSTRING')
+      #OROF('PSTRING')
+        #IF(%KeyNoCase)
+      IF UPPER(%InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScrollRecord]) => UPPER(%FreeElement)
+        #ELSE
+      IF %InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScrollRecord] => %FreeElement
+        #ENDIF
+      #ELSE
+      IF %InstancePrefix:KeyDistribution[%InstancePrefix:CurrentScrollRecord] => %FreeElement
+      #ENDCASE
+    #ENDIF
+        IF %InstancePrefix:CurrentScrollRecord <= 1
+          %InstancePrefix:CurrentScroll = 0
+        ELSIF %Instanceprefix:CurrentScrollRecord = %VerticalElementCount
+          %InstancePrefix:CurrentScroll = 100
+        ELSE
+          %InstancePrefix:CurrentScroll = ((%InstancePrefix:CurrentScrollRecord / %VerticalElementCount) * 100)
+        END
+        BREAK
+      END
+    END
+  #ENDIF
+    DO RefreshWindow
+  END
+!----------------------------------------------------------------------
+%InstancePrefix:ScrollUp ROUTINE
+  #EMBED(%StartScrollUp,'INTERNAL: Start of Scroll Up ROUTINE'),HIDE
+  IF RECORDS(%ListQueue)
+    IF CHOICE(%ListControl)>1
+      SELECT(%ListControl, CHOICE(%ListControl)-1)
+    ELSE
+      GET(%ListQueue,1)                            #<! Get the first queue item
+      RESET(%PrimaryKey,%InstancePrefix:Position)  #<! Reset for sequential processing
+  #FIX(%ActiveFile,%Primary)
+  #IF(%ActiveMemoExists)
+      NOMEMO(%Primary)
+  #ENDIF
+      PREVIOUS(%Primary)                           #<! Retrieve record, reverse access
+      %InstancePrefix:ItemsToFill = 1              #<! Load a single item
+      DO %InstancePrefix:FillBackward              #<! Fill with previous read(s)
+  #IF(%VerticalScrollBehavior='Fixed')
+      IF %InstancePrefix:ItemsToFill               #<! If Load failed
+        %InstancePrefix:CurrentScroll = 0          #<! Move Thumb to top
+      ELSE
+        %InstancePrefix:CurrentScroll = 50         #<! Move Thumb to center
+      END
+  #ENDIF
+    END
+    IF NOT %InstancePrefix:NewSelectPosted
+      %InstancePrefix:NewSelectPosted = True
+      POST(Event:NewSelection,%ListControl)
+    END
+  #EMBED(%EndScrollUp,'INTERNAL: End of Scroll Up ROUTINE'),HIDE
+  #IF(%LocatorType = 'Incremental')
+    %InstancePrefix:LocatorValue = ''
+    %InstancePrefix:LocatorLength = 0
+    %LocatorName = %InstancePrefix:LocatorValue
+  #ENDIF
+  END
+!----------------------------------------------------------------------
+%InstancePrefix:ScrollDown ROUTINE
+  #EMBED(%StartScrollDown,'INTERNAL: Start of Scroll Down ROUTINE'),HIDE
+  IF RECORDS(%ListQueue)
+    IF CHOICE(%ListControl)<RECORDS(%ListQueue)
+      SELECT(%ListControl, CHOICE(%ListControl)+1)
+    ELSE
+      GET(%ListQueue,RECORDS(%ListQueue))           #<! Get the last queue item
+      RESET(%PrimaryKey,%InstancePrefix:Position)   #<! Reset for sequential processing
+  #FIX(%ActiveFile,%Primary)
+  #IF(%ActiveMemoExists)
+      NOMEMO(%Primary)
+  #ENDIF
+      NEXT(%Primary)                                #<! Retrieve record, forward access
+      %InstancePrefix:ItemsToFill = 1               #<! load a single item
+      DO %InstancePrefix:FillForward                #<! Fill with next read(s)
+  #IF(%VerticalScrollBehavior='Fixed')
+      IF %InstancePrefix:ItemsToFill                #<! If Load failed
+        %InstancePrefix:CurrentScroll = 100         #<! Move Thumb to top
+      ELSE
+        %InstancePrefix:CurrentScroll = 50          #<! Move Thumb to center
+      END
+  #ENDIF
+    END
+    IF NOT %InstancePrefix:NewSelectPosted
+      %InstancePrefix:NewSelectPosted = True
+      POST(Event:NewSelection,%ListControl)
+    END
+  #EMBED(%EndScrollDown,'INTERNAL: End of Scroll Down ROUTINE'),HIDE
+  #IF(%LocatorType = 'Incremental')
+    %InstancePrefix:LocatorValue = ''
+    %InstancePrefix:LocatorLength = 0
+    %LocatorName = %InstancePrefix:LocatorValue
+  #ENDIF
+  END
+!----------------------------------------------------------------------
+%InstancePrefix:PageUp ROUTINE
+  #EMBED(%StartPageUp,'INTERNAL: Start of Page Up ROUTINE'),HIDE
+  IF RECORDS(%ListQueue)
+    GET(%ListQueue,1)                              #<! Get the first queue item
+    RESET(%PrimaryKey,%InstancePrefix:Position)    #<! Reset for sequential processing
+  #FIX(%ActiveFile,%Primary)
+  #IF(%ActiveMemoExists)
+    NOMEMO(%Primary)
+  #ENDIF
+    PREVIOUS(%Primary)                             #<! Retrieve record, reverse access
+    %InstancePrefix:ItemsToFill = %ListControl{Prop:Items} #<! Load a full page
+    DO %InstancePrefix:FillBackward                #<! Fill with previous read(s)
+    IF %InstancePrefix:ItemsToFill
+      %InstancePrefix:NextChoice = CHOICE(%ListControl)-%InstancePrefix:ItemsToFill
+      IF %InstancePrefix:NextChoice < 1
+        %InstancePrefix:NextChoice = 1
+      END
+      SELECT(%ListControl, %InstancePrefix:NextChoice)
+  #IF(%VerticalScrollBehavior='Fixed')
+      %InstancePrefix:CurrentScroll = 0            #<! Move Thumb to top
+    ELSE
+      %InstancePrefix:CurrentScroll = 50           #<! Move Thumb to center
+  #ENDIF
+    END
+  #EMBED(%EndPageUp,'INTERNAL: End of Page Up ROUTINE'),HIDE
+  #IF(%LocatorType = 'Incremental')
+    %InstancePrefix:LocatorValue = ''
+    %InstancePrefix:LocatorLength = 0
+    %LocatorName = %InstancePrefix:LocatorValue
+  #ENDIF
+    IF NOT %InstancePrefix:NewSelectPosted
+      %InstancePrefix:NewSelectPosted = True
+      POST(Event:NewSelection,%ListControl)
+    END
+  END
+!----------------------------------------------------------------------
+%InstancePrefix:PageDown ROUTINE
+  #EMBED(%StartPageDown,'INTERNAL: Start of Page Down ROUTINE'),HIDE
+  IF RECORDS(%ListQueue)
+    GET(%ListQueue,RECORDS(%ListQueue))            #<! Get the last queue item
+    RESET(%PrimaryKey,%InstancePrefix:Position)    #<! Reset for sequential processing
+  #FIX(%ActiveFile,%Primary)
+  #IF(%ActiveMemoExists)
+    NOMEMO(%Primary)
+  #ENDIF
+    NEXT(%Primary)                                 #<! Retrieve record, forward access
+    %InstancePrefix:ItemsToFill = %ListControl{Prop:Items} #<! Load a full page
+    DO %InstancePrefix:FillForward                 #<! Fill with next read(s)
+    IF %InstancePrefix:ItemsToFill
+      %InstancePrefix:NextChoice = CHOICE(%ListControl)+%InstancePrefix:ItemsToFill
+      IF %InstancePrefix:NextChoice > RECORDS(%ListQueue)
+        %InstancePrefix:NextChoice = RECORDS(%ListQueue)
+      END
+      SELECT(%ListControl, %InstancePrefix:NextChoice)
+  #IF(%VerticalScrollBehavior='Fixed')
+      %InstancePrefix:CurrentScroll = 100          #<! Move Thumb to top
+    ELSE
+      %InstancePrefix:CurrentScroll = 50           #<! Move Thumb to center
+  #ENDIF
+    END
+  #EMBED(%EndPageDown,'INTERNAL: End of Page Down ROUTINE'),HIDE
+  #IF(%LocatorType = 'Incremental')
+    %InstancePrefix:LocatorValue = ''
+    %InstancePrefix:LocatorLength = 0
+    %LocatorName = %InstancePrefix:LocatorValue
+  #ENDIF
+    IF NOT %InstancePrefix:NewSelectPosted
+      %InstancePrefix:NewSelectPosted = True
+      POST(Event:NewSelection,%ListControl)
+    END
+  END
+!----------------------------------------------------------------------
+%InstancePrefix:ScrollTop ROUTINE
+  #EMBED(%StartScrollTop,'INTERNAL: Start of Scroll Top ROUTINE'),HIDE
+  IF RECORDS(%ListQueue)
+    FREE(%ListQueue)
+    DO %InstancePrefix:RefreshPage
+    SELECT(%ListControl,1)                         #<! Select first list item
+  #IF(%VerticalScrollBehavior='Fixed')
+    %InstancePrefix:CurrentScroll = 0
+  #ENDIF
+  #EMBED(%EndScrollTop,'INTERNAL: End of Scroll Top ROUTINE'),HIDE
+  #IF(%LocatorType = 'Incremental')
+    %InstancePrefix:LocatorValue = ''
+    %InstancePrefix:LocatorLength = 0
+    %LocatorName = %InstancePrefix:LocatorValue
+  #ENDIF
+    IF NOT %InstancePrefix:NewSelectPosted
+      %InstancePrefix:NewSelectPosted = True
+      POST(Event:NewSelection,%ListControl)
+    END
+  END
+!----------------------------------------------------------------------
+%InstancePrefix:ScrollBottom ROUTINE
+  #EMBED(%StartScrollBottom,'INTERNAL: Start of Scroll Bottom ROUTINE'),HIDE
+  IF RECORDS(%ListQueue)
+    SETCURSOR(Cursor:Wait)
+    FREE(%ListQueue)                                #<! Free the browse queue
+    DO %InstancePrefix:ResetHigh                    #<! Reset for first page access
+    %InstancePrefix:ItemsToFill = %ListControl{Prop:Items} #<! Load a full page
+    DO %InstancePrefix:FillBackward                 #<! Fill with previous read(s)
+    SELECT(%ListControl, RECORDS(%ListQueue))       #<! Select last list item
+   #IF(%VerticalScrollBehavior='Fixed')
+    IF RECORDS(%ListQueue) = %ListControl{Prop:Items}
+      %InstancePrefix:CurrentScroll = 100
+    ELSE
+      %InstancePrefix:CurrentScroll = 0
+    END
+  #ENDIF
+    SETCURSOR()
+    #EMBED(%EndScrollBottom,'INTERNAL: End of Scroll Bottom ROUTINE'),HIDE
+  #IF(%LocatorType = 'Incremental')
+    %InstancePrefix:LocatorValue = ''
+    %InstancePrefix:LocatorLength = 0
+    %LocatorName = %InstancePrefix:LocatorValue
+  #ENDIF
+    IF NOT %InstancePrefix:NewSelectPosted
+      %InstancePrefix:NewSelectPosted = True
+      POST(Event:NewSelection,%ListControl)
+    END
+  END
+!----------------------------------------------------------------------
+%InstancePrefix:AlertKey ROUTINE
+  #EMBED(%StartAlertKey,'INTERNAL: Start of Alert Key ROUTINE'),HIDE
+  #FIX(%Control,%ListControl)
+  #SUSPEND
+  #?IF RECORDS(%ListQueue)
+    #?CASE KEYCODE()                                #<! What keycode was hit
+    #?OF MouseLeft2
+      #EMBED(%BrowseBoxDoubleClickHandler,'Browse Double Click Handler'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+      #EMBED(%BrowseBoxDoubleClick,'INTERNAL Browse Box Double Click Handler'),HIDE
+    #EMBED(%BrowseBoxKeyHandling,'Browse Key Handling'),HIDE
+    #SUSPEND
+    #?ELSE                                          #<! ELSE (What keycode was hit)
+      #IF(%LocatorType = 'Incremental')
+      IF KEYCODE() = BSKey
+        IF %InstancePrefix:LocatorLength
+          %InstancePrefix:LocatorLength -= 1
+          %InstancePrefix:LocatorValue = SUB(%InstancePrefix:LocatorValue,1,%InstancePrefix:LocatorLength)
+          %LocatorName = %InstancePrefix:LocatorValue
+          GET(%Primary,0)
+          DO %InstancePrefix:LocateRecord
+        END
+      ELSIF KEYCODE() = SpaceKey
+        DO %InstancePrefix:ResetClear
+        %InstancePrefix:LocatorValue = SUB(%InstancePrefix:LocatorValue,1,%InstancePrefix:LocatorLength) & ' '
+        %InstancePrefix:LocatorLength += 1
+        %LocatorName = %InstancePrefix:LocatorValue
+        GET(%Primary,0)
+        DO %InstancePrefix:LocateRecord
+      ELSIF CHR(KEYCHAR())
+        DO %InstancePrefix:ResetClear
+        %InstancePrefix:LocatorValue = SUB(%InstancePrefix:LocatorValue,1,%InstancePrefix:LocatorLength) & CHR(KEYCHAR())
+        %InstancePrefix:LocatorLength += 1
+        %LocatorName = %InstancePrefix:LocatorValue
+        GET(%Primary,0)
+        DO %InstancePrefix:LocateRecord
+      END
+      #ELSIF(%LocatorType = 'Step')
+      IF CHR(KEYCHAR())
+        DO %InstancePrefix:ResetClear
+        %LocatorName = CHR(KEYCHAR())
+        GET(%Primary,0)
+        DO %InstancePrefix:LocateRecord             #<! Find the record
+      END
+      #ELSIF(%LocatorType = 'Entry')
+      IF CHR(KEYCHAR())
+        DO %InstancePrefix:ResetClear
+        SELECT(%LocatorControl)
+        PRESS(CHR(KEYCHAR()))
+      END
+      #ENDIF
+    #RESUME
+    #?END                                           #<! END (What keycode was hit)
+  #?END
+  IF NOT %InstancePrefix:NewSelectPosted
+    %InstancePrefix:NewSelectPosted = True
+    POST(Event:NewSelection,%ListControl)
+  END
+  #RESUME
+  #EMBED(%EndAlertKey,'INTERNAL: End of Alert Key ROUTINE'),HIDE
+!----------------------------------------------------------------------
+%InstancePrefix:ValidateRecord ROUTINE
+  #EMBED(%StartValidateRecordRoutine,'Start of Validate Record ROUTINE'),HIDE
+  #SUSPEND
+  #?%InstancePrefix:RecordStatus = Record:OutOfRange
+  #INSERT(%StandardFormula,'Before Range Limits')
+  #FIX(%File,%Primary)
+  #FIX(%Key,%PrimaryKey)
+  #IF(%RangeField)
+    #IF(%RangeLimitType='File Relationship')
+      #FIX(%Relation,%RangeFile)
+    #ENDIF
+    #FOR(%KeyField)
+      #IF(%KeyField=%RangeField)
+        #CASE(%RangeLimitType)
+        #OF('Current Value')
+          #IF(%KeyNoCase)
+  IF UPPER(%KeyField) <> UPPER(%InstancePrefix:Save:%KeyField) THEN EXIT.
+          #ELSE
+  IF %KeyField <> %InstancePrefix:Save:%KeyField THEN EXIT.
+          #ENDIF
+        #OF('Single Value')
+          #IF(%KeyNoCase)
+  IF UPPER(%KeyField) <> UPPER(%RangeLimit) THEN EXIT.
+          #ELSE
+  IF %KeyField <> %RangeLimit THEN EXIT.
+          #ENDIF
+        #OF('Range of Values')
+          #IF(%KeyNoCase)
+  IF UPPER(%KeyField) < UPPER(%RangeLow) THEN EXIT.
+  IF UPPER(%KeyField) > UPPER(%RangeHigh) THEN EXIT.
+          #ELSE
+  IF %KeyField < %RangeLow THEN EXIT.
+  IF %KeyField > %RangeHigh THEN EXIT.
+          #ENDIF
+        #OF('File Relationship')
+          #FIX(%FileKeyField,%KeyField)
+          #IF(%KeyNoCase)
+  IF UPPER(%FileKeyField) <> UPPER(%FileKeyFieldLink) THEN EXIT.
+          #ELSE
+  IF %FileKeyField <> %FileKeyFieldLink THEN EXIT.
+          #ENDIF
+        #ENDCASE
+        #BREAK
+      #ELSE
+        #IF(%RangeLimitType='File Relationship')
+          #FIX(%FileKeyField,%KeyField)
+          #IF(%KeyNoCase)
+  IF UPPER(%FileKeyField) <> UPPER(%FileKeyFieldLink) THEN EXIT.
+          #ELSE
+  IF %FileKeyField <> %FileKeyFieldLink THEN EXIT.
+          #ENDIF
+        #ELSE
+          #IF(%KeyNoCase)
+  IF UPPER(%KeyField) <> UPPER(%InstancePrefix:Save:%KeyField) THEN EXIT.
+          #ELSE
+  IF %KeyField <> %InstancePrefix:Save:%KeyField THEN EXIT.
+          #ENDIF
+        #ENDIF
+      #ENDIF
+    #ENDFOR
+  #ENDIF
+  #EMBED(%RecordOutOfRange,'Validate Record: Range Checking'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  #RESUME
+  #INSERT(%StandardSecondaryLookups)
+  #SUSPEND
+  #INSERT(%StandardFormula,'Before Filter')
+  #?%InstancePrefix:RecordStatus = Record:Filtered
+    #IF(%RecordFilter)
+  IF ~(%RecordFilter)
+    EXIT
+  END
+    #ENDIF
+  #EMBED(%RecordFilter,'Validate Record: Filter Checking'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  #RESUME
+  #EMBED(%AfterRangeFilterCheck,'After Range and Filter Check'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActivetemplateInstanceDescription)
+  %InstancePrefix:RecordStatus = Record:OK
+  #EMBED(%EndValidateRecordRoutine,'End of Validate Record ROUTINE'),HIDE
+  EXIT
+!----------------------------------------------------------------------
+%InstancePrefix:FillForward ROUTINE
+  #EMBED(%StartFillForwardRoutine,'Start of Fill Forward ROUTINE'),HIDE
+  #IF(%EnableQuickScan)
+  IF %InstancePrefix:ItemsToFill > 1
+    #EMBED(%BeforeTurnQuickScanOn,'Before Turning QuickScan On'),WHERE(%EnableQuickScan)
+    IF SEND(%Primary,'QUICKSCAN=on').
+    %InstancePrefix:QuickScan = True
+    #EMBED(%AfterTurnQuickScanOn,'After Turning QuickScan On'),WHERE(%EnableQuickScan)
+  END
+  #ENDIF
+  LOOP WHILE %InstancePrefix:ItemsToFill
+    #FOR(%ActiveFile),WHERE(%ActiveMemoExists AND NOT %ActiveMemoHot)
+    NOMEMO(%ActiveFile)
+    #ENDFOR
+    NEXT(%Primary)
+    IF ERRORCODE() THEN BREAK.
+    DO %InstancePrefix:ValidateRecord
+    EXECUTE(%InstancePrefix:RecordStatus)
+      BEGIN
+        GET(%ListQueue,RECORDS(%ListQueue))
+        DO %InstancePrefix:FillBuffer
+        BREAK
+      END
+      CYCLE
+    END
+    IF RECORDS(%ListQueue) = %ListControl{Prop:Items}
+      GET(%ListQueue,1)
+      DELETE(%ListQueue)
+    END
+    %InstancePrefix:ItemsToFill -= 1
+    DO %InstancePrefix:FillQueue
+    ADD(%ListQueue)
+  END
+  #IF(%EnableQuickScan)
+  IF %InstancePrefix:QuickScan
+    #EMBED(%BeforeTurnQuickScanOn,'Before Turning QuickScan Off'),WHERE(%EnableQuickScan)
+    IF SEND(%Primary,'QUICKSCAN=off').
+    %InstancePrefix:QuickScan = False
+    #EMBED(%AfterTurnQuickScanOn,'After Turning QuickScan Off'),WHERE(%EnableQuickScan)
+  END
+  #ENDIF
+  #EMBED(%EndFillForwardRoutine,'End of Fill Forward ROUTINE'),HIDE
+  EXIT
+!----------------------------------------------------------------------
+%InstancePrefix:FillBackward ROUTINE
+  #EMBED(%StartFillBackwardRoutine,'Start of Fill Backward ROUTINE'),HIDE
+  #IF(%EnableQuickScan)
+  IF %InstancePrefix:ItemsToFill > 1
+    #EMBED(%BeforeTurnQuickScanOn,'Before Turning QuickScan On'),WHERE(%EnableQuickScan)
+    IF SEND(%Primary,'QUICKSCAN=on').
+    %InstancePrefix:QuickScan = True
+    #EMBED(%AfterTurnQuickScanOn,'After Turning QuickScan On'),WHERE(%EnableQuickScan)
+  END
+  #ENDIF
+  LOOP WHILE %InstancePrefix:ItemsToFill
+    #FOR(%ActiveFile),WHERE(%ActiveMemoExists AND NOT %ActiveMemoHot)
+    NOMEMO(%ActiveFile)
+    #ENDFOR
+    PREVIOUS(%Primary)
+    IF ERRORCODE() THEN BREAK.
+    DO %InstancePrefix:ValidateRecord
+    EXECUTE(%InstancePrefix:RecordStatus)
+      BEGIN
+        GET(%ListQueue,1)
+        DO %InstancePrefix:FillBuffer
+        BREAK
+      END
+      CYCLE
+    END
+    IF RECORDS(%ListQueue) = %ListControl{Prop:Items}
+      GET(%ListQueue,RECORDS(%ListQueue))
+      DELETE(%ListQueue)
+    END
+    %InstancePrefix:ItemsToFill -= 1
+    DO %InstancePrefix:FillQueue
+    ADD(%ListQueue,1)
+  END
+  #IF(%EnableQuickScan)
+  IF %InstancePrefix:QuickScan
+    #EMBED(%BeforeTurnQuickScanOn,'Before Turning QuickScan Off'),WHERE(%EnableQuickScan)
+    IF SEND(%Primary,'QUICKSCAN=off').
+    %InstancePrefix:QuickScan = False
+    #EMBED(%AfterTurnQuickScanOn,'After Turning QuickScan Off'),WHERE(%EnableQuickScan)
+  END
+  #ENDIF
+  #EMBED(%EndFillBackwardRoutine,'End of Fill Backward ROUTINE'),HIDE
+  EXIT
+!----------------------------------------------------------------------
+%InstancePrefix:LocateRecord ROUTINE
+  #EMBED(%StartLocateRecordRoutine,'Start of Locate Record ROUTINE'),HIDE
+  SETCURSOR(Cursor:Wait)
+  FREE(%ListQueue)
+  IF POSITION(%PrimaryKey)
+    RESET(%PrimaryKey,POSITION(%PrimaryKey))
+  ELSE
+    SET(%PrimaryKey,%PrimaryKey)
+  END
+  %InstancePrefix:LocatedPosition = ''
+  LOOP
+    #FIX(%ActiveFile,%Primary)
+    #IF(%ActiveMemoExists AND NOT %ActiveMemoHot)
+    NOMEMO(%Primary)
+    #ENDIF
+    NEXT(%Primary)
+    IF ERRORCODE() THEN BREAK.
+    DO %InstancePrefix:ValidateRecord
+    EXECUTE(%InstancePrefix:RecordStatus)
+      BREAK
+      CYCLE
+    END
+    %InstancePrefix:LocatedPosition = POSITION(%PrimaryKey)
+    RESET(%PrimaryKey,%InstancePrefix:LocatedPosition)
+    BREAK
+  END
+  %InstancePrefix:ItemsToFill = %ListControl{Prop:Items}
+  #IF(%VerticalScrollBehavior='Fixed')
+  %InstancePrefix:CurrentScroll = 50
+  #ENDIF
+  DO %InstancePrefix:FillForward
+  IF %InstancePrefix:ItemsToFill
+  #IF(%VerticalScrollBehavior='Fixed')
+    %InstancePrefix:CurrentScroll = 100
+  #ENDIF
+    IF ~RECORDS(%ListQueue)
+      DO %InstancePrefix:ResetHigh                 #<! Reset for first page access
+    ELSE
+      GET(%ListQueue,1)
+      RESET(%PrimaryKey,%InstancePrefix:Position)
+      #FIX(%ActiveFile,%Primary)
+      #IF(%ActiveMemoExists AND NOT %ActiveMemoHot)
+      NOMEMO(%Primary)
+      #ENDIF
+      PREVIOUS(%Primary)
+    END
+    DO %InstancePrefix:FillBackward
+  #IF(%VerticalScrollBehavior='Fixed')
+    IF %InstancePrefix:ItemsToFill
+      %InstancePrefix:CurrentScroll = 0
+    END
+  #ENDIF
+  END
+  IF ~RECORDS(%ListQueue)
+    #FIX(%File,%Primary)
+    CLEAR(%FilePrefix:Record)
+    #FOR(%Field),WHERE(%FieldType='MEMO')
+    CLEAR(%Field)
+    #ENDFOR
+    #FIX(%Control,%ListControl)
+    %ListControl{Prop:Disable} = 1
+    #IF(%LocatorControl)
+    %LocatorControl{Prop:Disable} = 1
+    #ENDIF
+    #EMBED(%BrowseBoxEmpty,'Browse Box, no records found'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+  ELSE
+    #IF(%LocatorControl)
+    %LocatorControl{Prop:Disable} = 0
+    #ENDIF
+    #FIX(%Control,%ListControl)
+    %ListControl{Prop:Disable} = 0
+    IF %InstancePrefix:LocatedPosition
+      %InstancePrefix:QueuePointer = 1
+      LOOP
+        GET(%ListQueue,%InstancePrefix:QueuePointer)
+        IF ERRORCODE() THEN BREAK.
+        IF %InstancePrefix:Position = %InstancePrefix:LocatedPosition THEN BREAK.
+        %InstancePrefix:QueuePointer += 1
+      END
+    ELSE
+      %InstancePrefix:QueuePointer = RECORDS(%ListQueue)
+    END
+    SELECT(%ListControl,%InstancePrefix:QueuePointer)
+    DO %InstancePrefix:FillBuffer
+    #EMBED(%BrowseBoxNotEmpty,'Browse Box, Records Found'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+  END
+  SETCURSOR()
+  #EMBED(%EndLocateRecordRoutine,'End of Locate Record ROUTINE'),HIDE
+  EXIT
+!----------------------------------------------------------------------
+%InstancePrefix:RefreshPage ROUTINE
+  #EMBED(%StartRefreshPageRoutine,'Start of Refresh Page ROUTINE'),HIDE
+  SETCURSOR(Cursor:Wait)
+  IF NOT RECORDS(%ListQueue)
+    %InstancePrefix:InitializePage = True
+    DO %InstancePrefix:ResetLow
+  ELSE
+    %InstancePrefix:InitializePage = False
+    GET(%ListQueue,1)
+    RESET(%PrimaryKey,%InstancePrefix:Position)
+  END
+  FREE(%ListQueue)
+  %InstancePrefix:ItemsToFill = %ListControl{Prop:Items}
+  #IF(%VerticalScrollBehavior='Fixed')
+  %InstancePrefix:CurrentScroll = 50
+  #ENDIF
+  DO %InstancePrefix:FillForward
+  IF NOT %InstancePrefix:InitializePage
+    IF %InstancePrefix:ItemsToFill
+      GET(%ListQueue,1)
+      RESET(%PrimaryKey,%InstancePrefix:Position)
+    #FIX(%ActiveFile,%Primary)
+    #IF(%ActiveMemoExists AND NOT %ActiveMemoHot)
+      NOMEMO(%Primary)
+    #ENDIF
+      PREVIOUS(%Primary)
+  #IF(%VerticalScrollBehavior='Fixed')
+      %InstancePrefix:CurrentScroll = 100
+  #ENDIF
+      DO %InstancePrefix:FillBackward
+    END
+  END
+  #IF(%VerticalScrollBehavior='Fixed')
+  IF %InstancePrefix:ItemsToFill
+    %InstancePrefix:CurrentScroll = 0
+  END
+  #ENDIF
+  IF ~RECORDS(%ListQueue)
+    #FIX(%File,%Primary)
+    CLEAR(%FilePrefix:Record)
+    #FOR(%Field),WHERE(%FieldType='MEMO')
+    CLEAR(%Field)
+    #ENDFOR
+    #IF(%LocatorControl)
+    %LocatorControl{Prop:Disable} = 1
+    #ENDIF
+    #FIX(%Control,%ListControl)
+    %ListControl{Prop:Disable} = 1
+    #EMBED(%BrowseBoxEmpty,'Browse Box, No Records Found'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+  ELSE
+    #IF(%LocatorControl)
+    %LocatorControl{Prop:Disable} = 0
+    #ENDIF
+    %ListControl{Prop:Disable} = 0
+    GET(%ListQueue,CHOICE(%ListControl))
+    IF ERRORCODE()
+      GET(%ListQueue,RECORDS(%ListQueue))
+    END
+    DO %InstancePrefix:FillBuffer
+    #EMBED(%BrowseBoxNotEmpty,'Browse Box, Records Found'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+  END
+  SETCURSOR()
+  #EMBED(%EndRefreshPageRoutine,'End of Refresh Page ROUTINE'),HIDE
+  EXIT
+#ENDAT
+#!-------------------------------------------------------------------------
+#GROUP(%BrowseBoxLimitCode,%CodeType)
+#MESSAGE('Browse Reset Code',3)
+#FIX(%File,%Primary)
+#FIX(%Key,%PrimaryKey)
+#IF(%RangeLimitType = 'File Relationship')
+  #FIX(%Relation,%RangeFile)
+#ENDIF
+#IF(%CodeType='High')
+#EMBED(%CodeTypeHigh,'Range Code, before setting BrowseBox key to high values'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+#ELSIF(%CodeType='Low')
+#EMBED(%CodeTypeLow,'Range Code, before setting BrowseBox key to low values'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+#ELSIF(%CodeType='Clear')
+#EMBED(%CodeTypeClear,'Range Code, before setting BrowseBox key to clear values'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+#ELSIF(%CodeType='Set')
+#EMBED(%CodeTypeElse,'Range Code, before saving BrowseBox range limit values'),%ActiveTemplateInstance,MAP(%ActiveTemplateInstance,%ActiveTemplateinstanceDescription)
+#ENDIF
+#IF(%RangeField)
+#DECLARE(%LimitFound)
+  #SET(%LimitFound,%False)
+  #FOR(%KeyField)
+    #IF(%LimitFound)
+      #IF(%CodeType='High')
+        #IF(%KeyFieldSequence='ASCENDING')
+CLEAR(%KeyField,1)
+        #ELSE
+CLEAR(%KeyField,-1)
+        #ENDIF
+      #ELSIF(%CodeType='Low')
+        #IF(%KeyFieldSequence='ASCENDING')
+CLEAR(%KeyField,-1)
+        #ELSE
+CLEAR(%KeyField,1)
+        #ENDIF
+      #ELSIF(%CodeType='Clear')
+CLEAR(%KeyField)
+      #ENDIF
+    #ELSE
+      #IF(%KeyField=%RangeField)
+        #CASE(%RangeLimitType)
+        #OF('Current Value')
+          #IF(%CodeType='Set')
+%InstancePrefix:Save:%KeyField = %KeyField
+         #ELSE
+%KeyField = %InstancePrefix:Save:%KeyField
+         #ENDIF
+        #OF('Single Value')
+%KeyField = %RangeLimit
+        #OF('Range of Values')
+          #IF(%KeyFieldSequence='ASCENDING')
+            #IF(%CodeType='High')
+%KeyField = %RangeHigh
+            #ELSIF(%CodeType='Low')
+%KeyField = %RangeLow
+            #ELSIF(%CodeType='Clear')
+CLEAR(%KeyField)
+            #ENDIF
+          #ELSE
+            #IF(%CodeType='High')
+%KeyField = %RangeLow
+            #ELSIF(%CodeType='Low')
+%KeyField = %RangeHigh
+            #ELSIF(%CodeType='Clear')
+CLEAR(%KeyField)
+            #ENDIF
+          #ENDIF
+        #OF('File Relationship')
+          #FIX(%FileKeyField,%KeyField)
+%FileKeyField = %FileKeyFieldLink
+        #ENDCASE
+        #SET(%LimitFound,%True)
+      #ELSE
+        #IF(%RangeLimitType = 'File Relationship')
+          #FIX(%FileKeyField,%KeyField)
+%FileKeyField = %FileKeyFieldLink
+        #ELSE
+          #IF(%CodeType='Set')
+%InstancePrefix:Save:%KeyField = %KeyField
+          #ELSE
+%KeyField = %InstancePrefix:Save:%KeyField
+          #ENDIF
+        #ENDIF
+      #ENDIF
+    #ENDIF
+  #ENDFOR
+  #IF(%CodeType<>'Set')
+SET(%Primarykey,%PrimaryKey)
+  #ENDIF
+#ELSE
+SET(%PrimaryKey)
+#ENDIF
+#INCLUDE('CtlBrowA.TPW')                         #! Additional controls
+                                                 #! linked to BrowseBox

@@ -1,0 +1,1451 @@
+#!----------------------------------------------------------------
+#CONTROL(CloseButton,'Close the Window'),WINDOW,HLP('~TPLControlCloseButton')
+  CONTROLS
+    BUTTON('Close'),USE(?Close)
+  END
+#ATSTART
+  #DECLARE(%CloseControl)
+  #FOR(%Control),WHERE(%ControlInstance=%ActiveTemplateInstance)
+    #SET(%CloseControl,%Control)
+  #ENDFOR
+#ENDAT
+#AT(%ControlEventHandling,%CloseControl,'Accepted')
+LocalResponse = RequestCancelled
+POST(Event:CloseWindow)
+#ENDAT
+#!----------------------------------------------------------------
+#CONTROL(CancelButton,'Cancel the Current Operation'),WINDOW,HLP('~TPLControlCancelButton')
+  CONTROLS
+    BUTTON('Cancel'),USE(?Cancel)
+  END
+#ATSTART
+  #DECLARE(%CancelControl)
+  #FOR(%Control),WHERE(%ControlInstance=%ActiveTemplateInstance)
+    #SET(%CancelControl,%Control)
+  #ENDFOR
+#ENDAT
+#AT(%ControlEventHandling,%CancelControl,'Accepted')
+LocalResponse = RequestCancelled
+POST(Event:CloseWindow)
+#ENDAT
+#!----------------------------------------------------------------
+#CONTROL(SaveButton,'Write Records to a data file'),PRIMARY('Update Record on Disk',NOKEY),DESCRIPTION('Update ' & %Primary & ' record on disk'),WINDOW,HLP('~TPLControlSaveButton')
+  CONTROLS
+    BUTTON('OK'),USE(?OK),DEFAULT,REQ
+  END
+#LOCALDATA
+ActionMessage        CSTRING(40)
+RecordChanged        BYTE,AUTO
+#ENDLOCALDATA
+#CLASS('Prime Fields','Prime Fields of ' & %Primary & ' record at beginning of Insert')
+#BOXED('Save Button Properties')
+  #DISPLAY('Allow:')
+  #PROMPT('Inserts',CHECK),%InsertAllowed,DEFAULT(%True),AT(50,9,40)
+  #PROMPT('Changes',CHECK),%ChangeAllowed,DEFAULT(%True),AT(100,9,40)
+  #PROMPT('Deletes',CHECK),%DeleteAllowed,DEFAULT(%True),AT(150,9,40)
+  #ENABLE(%DeleteAllowed = %True)
+    #PROMPT('When called for delete:',DROP('Standard Warning|Display Form|Automatic Delete')),%ActionOnDelete,DEFAULT('Standard Warning')
+  #ENDENABLE
+  #ENABLE(%InsertAllowed = %True)
+    #BUTTON('Field Priming on Insert'),MULTI(%PrimingFields,%PrimedField & ' = ' & %PrimedValue),AT(10),HLP('~TPLControlSaveButton')
+      #PROMPT('Field to Prime:',FIELD),%PrimedField,REQ
+      #PROMPT('Initial Value:',@S255),%PrimedValue,REQ
+    #ENDBUTTON
+  #ENDENABLE
+  #BUTTON('Messages and Titles'),HLP('TPLControlSaveButton'),HLP('~TPLControlSaveButton')
+    #ENABLE(%InsertAllowed = %True)
+      #PROMPT('&Insert Message:',@S40),%InsertMessage,DEFAULT('Record will be Added')
+    #ENDENABLE
+    #ENABLE(%ChangeAllowed = %True)
+      #PROMPT('Chan&ge Message:',@S40),%ChangeMessage,DEFAULT('Record will be Changed')
+    #ENDENABLE
+    #ENABLE(%DeleteAllowed = %True)
+      #PROMPT('De&lete Message:',@S40),%DeleteMessage,DEFAULT('Record will be Deleted')
+    #ENDENABLE
+    #ENABLE(%InsertAllowed OR %ChangeAllowed)
+      #PROMPT('On Aborted Add/Change:',DROP('Offer to save changes|Confirm cancel|Cancel without confirming')),%ActionOnCancel,DEFAULT('Offer to save changes')
+    #ENDENABLE
+    #PROMPT('&Location of Message:',DROP('None/Window Control|Title Bar|Status Bar')),%MessageLocation
+    #ENABLE(%MessageLocation='Status Bar')
+      #PROMPT('Status Bar Section:',@n1),%MessageStatusSection,REQ
+    #ENDENABLE
+    #PROMPT('Display Record Identifier on the Title Bar',CHECK),%AppendToTitle,AT(10,,180)
+    #ENABLE(%AppendToTitle = %True)
+      #PROMPT('Record Identifier:',@S255),%AppendToTitleID,REQ
+    #ENDENABLE
+  #ENDBUTTON
+#ENDBOXED
+#AT(%CustomGlobalDeclarations)
+  #INSERT(%StandardGlobalSetup)
+#ENDAT
+#ATSTART
+  #INSERT(%FileControlInitialize)
+  #DECLARE(%HandledFile),UNIQUE
+  #DECLARE(%InsertAction,%HandledFile)
+  #DECLARE(%FirstHandledValue)
+  #DECLARE(%LastHandledValue)
+  #INSERT(%SaveButtonRecordHandlingGather,%Primary)
+  #DECLARE(%AutoIncrementOnAdd)
+  #DECLARE(%ClearValue)
+  #DECLARE(%ElementCount)
+  #DECLARE(%OKControl)
+  #DECLARE(%SavedField),UNIQUE
+  #FOR(%Control),WHERE(%ControlInstance = %ActiveTemplateInstance)
+    #SET(%OKControl,%Control)
+  #ENDFOR
+  #FIX(%File,%Primary)
+  #IF(%InsertAllowed)
+    #FOR(%Key),WHERE(%KeyAuto)
+      #SET(%AutoIncrementOnAdd,%True)
+      #BREAK
+    #ENDFOR
+  #ENDIF
+#ENDAT
+#AT(%DataSectionBeforeWindow)
+  #FOR(%HandledFile)
+#INSERT(%SaveButtonRecordHandler,'DECLARE',%HandledFile)
+  #ENDFOR
+  #FIX(%File,%Primary)
+  #IF(%AutoIncrementOnAdd)
+Auto::Attempts       LONG,AUTO
+    #FOR(%Key),WHERE(%KeyAuto)
+      #FOR(%KeyField)
+        #FIX(%SavedField,%KeyField)
+        #IF(%SavedField <> %KeyField)
+          #ADD(%SavedField,%KeyField)
+          #FIX(%Field,%KeyField)
+          #IF(%FieldType='GROUP')
+Auto::Save:%[12]Field LIKE(%Field),PRE(SV)
+          #ELSE
+Auto::Save:%[12]Field LIKE(%Field)
+          #ENDIF
+        #ENDIF
+      #ENDFOR
+    #ENDFOR
+  #ENDIF
+#ENDAT
+#AT(%AfterFileOpen)
+RISnap:%Primary
+  #FOR(%HandledFile)
+#INSERT(%SaveButtonRecordHandler,'SET',%HandledFile)
+  #ENDFOR
+  #IF(%InsertAllowed)
+IF LocalRequest = InsertRecord
+  #EMBED(%OnInsertBeforePriming,'On Insert, before record is primed')
+  LocalResponse = RequestCompleted
+  DO PrimeFields
+  IF LocalResponse = RequestCancelled
+    DO ProcedureReturn
+  END
+  LocalResponse = RequestCancelled
+  #EMBED(%OnInsertAfterPriming,'On Insert, after record is primed')
+END
+  #ENDIF
+  #IF(%DeleteAllowed)
+    #IF(%ActionOnDelete = 'Standard Warning')
+IF LocalRequest = DeleteRecord
+  IF StandardWarning(Warn:StandardDelete) = Button:OK
+    LOOP
+      LocalResponse = RequestCancelled
+      SETCURSOR(Cursor:Wait)
+      IF RIDelete:%Primary()
+        SETCURSOR()
+        CASE StandardWarning(Warn:DeleteError)
+        OF Button:Yes
+          CYCLE
+        OF Button:No OROF Button:Cancel
+          BREAK
+        END
+      ELSE
+        SETCURSOR()
+        LocalResponse = RequestCompleted
+      END
+      BREAK
+    END
+  END
+  DO ProcedureReturn
+END
+    #ELSIF(%ActionOnDelete = 'Automatic Delete')
+IF LocalRequest = DeleteRecord
+  LOOP
+    LocalResponse = RequestCancelled
+    SETCURSOR(Cursor:Wait)
+    IF RIDelete:%Primary()
+      SETCURSOR()
+      CASE StandardWarning(Warn:DeleteError)
+      OF Button:Yes
+        CYCLE
+      OF Button:No OROF Button:Cancel
+        BREAK
+      END
+    ELSE
+      SETCURSOR()
+      LocalResponse = RequestCompleted
+    END
+    BREAK
+  END
+  DO ProcedureReturn
+END
+    #ENDIF
+  #ENDIF
+#ENDAT
+#AT(%BeforeAccept)
+CASE LocalRequest
+OF InsertRecord
+  #IF(%InsertAllowed)
+    #IF(%InsertMessage)
+  #INSERT(%StandardValueAssignment,'ActionMessage',%InsertMessage)
+    #ELSE
+  CLEAR(ActionMessage)
+    #ENDIF
+  #ELSE
+  IF StandardWarning(Warn:InsertDisabled)
+    RETURN
+  END
+  #ENDIF
+OF ChangeRecord
+  #IF(%ChangeAllowed)
+    #IF(%ChangeMessage)
+  #INSERT(%StandardValueAssignment,'ActionMessage',%ChangeMessage)
+    #ELSE
+  CLEAR(ActionMessage)
+    #ENDIF
+  #ELSE
+  IF StandardWarning(Warn:UpdateDisabled)
+    RETURN
+  END
+  #ENDIF
+OF DeleteRecord
+  #IF(%DeleteAllowed)
+    #IF(%ActionOnDelete = 'Display Form')
+      #IF(%DeleteMessage)
+  #INSERT(%StandardValueAssignment,'ActionMessage',%DeleteMessage)
+      #ELSE
+  CLEAR(ActionMessage)
+      #ENDIF
+    #ENDIF
+  #ELSE
+   IF StandardWarning(Warn:DeleteDisabled)
+    RETURN
+  END
+  #ENDIF
+END
+  #IF(%MessageLocation = 'Title Bar')
+%Window{Prop:Text} = ActionMessage
+  #ELSIF(%MessageLocation = 'Status Bar')
+%Window{Prop:StatusText,%MessageStatusSection} = ActionMessage
+  #ENDIF
+  #IF(%AppendToTitle)
+    #IF(%DeleteAllowed OR %ChangeAllowed OR %InsertAllowed)
+CASE LocalRequest
+      #IF(%DeleteAllowed OR %ChangeAllowed)
+        #IF(%DeleteAllowed AND %ChangeAllowed)
+OF ChangeRecord OROF DeleteRecord
+        #ELSIF(%ChangeAllowed)
+OF ChangeRecord
+        #ELSE
+OF DeleteRecord
+        #ENDIF
+        #IF(SUB(%AppendToTitleID,1,1)='!')
+          #SET(%ValueConstruct,SUB(%AppendToTitleID,2,LEN(%AppendToTitleID)-1))
+  %Window{Prop:Text} = %Window{Prop:Text} & '  (' & CLIP(%ValueConstruct) & ')'
+        #ELSE
+  %Window{Prop:Text} = %Window{Prop:Text} & '  (%AppendToTitleID)'
+        #ENDIF
+      #ENDIF
+      #IF(%InsertAllowed)
+OF InsertRecord
+  %Window{Prop:Text} = %Window{Prop:Text} & '  (New)'
+      #ENDIF
+END
+    #ENDIF
+  #ENDIF
+#ENDAT
+#AT(%WindowEventHandling,'CloseWindow')
+IF LocalResponse <> RequestCompleted
+  #IF(%ActionOnCancel = 'Offer to save changes' OR %ActionOnCancel = 'Confirm cancel')
+  RecordChanged = False
+    #IF(%InsertAllowed OR %ChangeAllowed)
+      #IF(%InsertAllowed AND %ChangeAllowed)
+  IF LocalRequest = InsertRecord OR LocalRequest = ChangeRecord
+      #ELSIF(%InsertAllowed)
+  IF LocalRequest = InsertRecord
+      #ELSE
+  IF LocalRequest = ChangeRecord
+      #ENDIF
+      #FOR(%HandledFile)
+    #INSERT(%SaveButtonRecordHandler,'CHECK',%HandledFile)
+      #ENDFOR
+      #FIX(%File,%FilePrefix)
+  END
+  IF RecordChanged
+      #IF(%ActionOnCancel = 'Offer to save changes')
+    CASE StandardWarning(Warn:SaveOnCancel)
+    OF Button:Yes
+      POST(Event:Accepted,%OKControl)
+      CYCLE
+    OF Button:No
+    OF BUTTON:Cancel
+      SELECT(%FirstField)
+      CYCLE
+    END
+      #ELSE
+    IF StandardWarning(Warn:ConfirmCancel) = Button:No
+      SELECT(%FirstField)
+      CYCLE
+    END
+      #ENDIF
+  END
+    #ENDIF
+  #ENDIF
+  #IF(%AutoIncrementOnAdd)
+  IF OriginalRequest = InsertRecord
+    IF LocalResponse = RequestCancelled
+      DELETE(%Primary)
+    END
+  END
+  #ENDIF
+END
+#ENDAT
+#AT(%WindowEventHandling,'CloseDown')
+IF LocalResponse <> RequestCompleted
+  #IF(%ActionOnCancel = 'Offer to save changes' OR %ActionOnCancel = 'Confirm cancel')
+  RecordChanged = False
+    #IF(%InsertAllowed OR %ChangeAllowed)
+      #IF(%InsertAllowed AND %ChangeAllowed)
+  IF LocalRequest = InsertRecord OR LocalRequest = ChangeRecord
+      #ELSIF(%InsertAllowed)
+  IF LocalRequest = InsertRecord
+      #ELSE
+  IF LocalRequest = ChangeRecord
+      #ENDIF
+      #FOR(%HandledFile)
+    #INSERT(%SaveButtonRecordHandler,'CHECK',%HandledFile)
+      #ENDFOR
+      #FIX(%File,%FilePrefix)
+  END
+  IF RecordChanged
+      #IF(%ActionOnCancel = 'Offer to save changes')
+    CASE StandardWarning(Warn:SaveOnCancel)
+    OF Button:Yes
+      POST(Event:Accepted,%OKControl)
+      CYCLE
+    OF Button:No
+    OF BUTTON:Cancel
+      SELECT(%FirstField)
+      CYCLE
+    END
+      #ELSE
+    IF StandardWarning(Warn:ConfirmCancel) = Button:No
+      SELECT(%FirstField)
+      CYCLE
+    END
+      #ENDIF
+  END
+    #ENDIF
+  #ENDIF
+  #IF(%AutoIncrementOnAdd)
+  IF OriginalRequest = InsertRecord
+    IF LocalResponse = RequestCancelled
+      DELETE(%Primary)
+    END
+  END
+  #ENDIF
+END
+#ENDAT
+#AT(%WindowOtherEventHandling)
+  #FIX(%File,%Primary)
+IF EVENT() = Event:Completed
+  #EMBED(%BeforeFileAction,'When completed, before writing to disk')
+  CASE LocalRequest
+  #IF(%InsertAllowed)
+  OF InsertRecord
+    #IF(%AutoIncrementOnAdd)
+    PUT(%Primary)
+    #ELSE
+    ADD(%Primary)
+    #END
+    CASE ERRORCODE()
+    OF NoError
+      LocalResponse = RequestCompleted
+      POST(Event:CloseWindow)
+      #SUSPEND
+    #?OF DupKeyErr
+        #DECLARE(%FirstKeyRead)
+        #FOR(%Key),WHERE(NOT %KeyDuplicate)
+          #IF(%FirstKeyRead)
+      ELSIF DUPLICATE(%Key)
+          #ELSE
+      IF DUPLICATE(%Key)
+          #ENDIF
+          #IF(%KeyDescription)
+        IF StandardWarning(Warn:DuplicateKey,'%KeyDescription')
+          #ELSE
+        IF StandardWarning(Warn:DuplicateKey,'%Key')
+          #ENDIF
+          SELECT(%FirstField)
+          CYCLE
+        END
+      END
+        #ENDFOR
+      #RESUME
+    ELSE
+      IF StandardWarning(Warn:InsertError)
+        SELECT(%FirstField)
+        CYCLE
+      END
+    END
+  #ENDIF
+  #IF(%ChangeAllowed)
+  OF ChangeRecord
+    LOOP
+      LocalResponse = RequestCancelled
+      SETCURSOR(Cursor:Wait)
+      IF RIUpdate:%Primary()
+        SETCURSOR()
+        CASE StandardWarning(Warn:UpdateError)
+        OF Button:Yes
+          CYCLE
+        OF Button:No
+          POST(Event:CloseWindow)
+          BREAK
+        OF Button:Cancel
+          DISPLAY
+          SELECT(%FirstField)
+          BREAK
+        END
+      ELSE
+        SETCURSOR()
+        LocalResponse = RequestCompleted
+        POST(Event:CloseWindow)
+      END
+      BREAK
+    END
+  #ENDIF
+  #IF(%DeleteAllowed AND %ActionOnDelete = 'Display Form')
+  OF DeleteRecord
+    LOOP
+      LocalResponse = RequestCancelled
+      SETCURSOR(Cursor:Wait)
+      IF RIDelete:%Primary()
+        SETCURSOR()
+        CASE StandardWarning(Warn:DeleteError)
+        OF Button:Yes
+          CYCLE
+        OF Button:No
+          POST(Event:CloseWindow)
+          BREAK
+        OF Button:Cancel
+          DISPLAY
+          SELECT(%FirstField)
+          BREAK
+        END
+      ELSE
+        SETCURSOR()
+        LocalResponse = RequestCompleted
+        POST(Event:CloseWindow)
+      END
+      BREAK
+    END
+  #ENDIF
+  END
+END
+#ENDAT
+#AT(%ControlEventHandling,%OKControl,'Accepted')
+IF OriginalRequest = ChangeRecord OR OriginalRequest = InsertRecord
+  SELECT()
+ELSE
+  POST(EVENT:Completed)
+END
+#ENDAT
+#AT(%RefreshWindowBeforeLookup)
+#INSERT(%StandardSecondaryLookups)
+#ENDAT
+#AT(%ProcedureRoutines)
+#DECLARE(%SetNecessary)
+#SET(%SetNecessary,%False)
+  #IF(%InsertAllowed)
+PrimeFields ROUTINE
+    #SUSPEND
+    #FIX(%File,%Primary)
+  #INSERT(%SaveButtonRecordHandler,'RESET',%Primary)
+    #FOR(%Field),WHERE(%FieldInitial)
+  %Field = %FieldInitial
+    #ENDFOR
+    #FOR(%PrimingFields)
+  %PrimedField = %PrimedValue
+    #ENDFOR
+  #EMBED(%PrimeFields,'Prime record fields on Insert'),WHERE(%InsertAllowed)
+  #INSERT(%SaveButtonRecordHandler,'SET',%Primary)
+    #RESUME
+  #ENDIF
+  #IF(%AutoIncrementOnAdd)
+  Auto::Attempts = 0
+  LOOP
+    #FOR(%Key),WHERE(%KeyAuto)
+      #IF(ITEMS(%KeyField)>1)
+        #FOR(%KeyField)
+          #IF(%KeyField=%KeyAuto)
+            #IF(%KeyFieldSequence = 'ASCENDING')
+              #SET(%ClearValue,'1')
+            #ELSE
+              #SET(%Clearvalue,'-1')
+            #ENDIF
+          #ENDIF
+        #ENDFOR
+        #FOR(%KeyField),WHERE(%KeyField <> %KeyAuto)
+    Auto::Save:%KeyField = %KeyField
+        #ENDFOR
+    CLEAR(%KeyAuto,%ClearValue)
+    SET(%Key,%Key)
+        #IF(%ClearValue=1)
+    PREVIOUS(%File)
+        #ELSE
+    NEXT(%File)
+        #ENDIF
+        #FOR(%KeyField)
+          #IF(%KeyField=%KeyAuto)
+            #BREAK
+          #ENDIF
+        #ENDFOR
+    IF ERRORCODE() AND ERRORCODE() <> BadRecErr
+      StandardWarning(Warn:RecordFetchError,'%File')
+      POST(Event:CloseWindow)
+      EXIT
+    END
+        #IF(ITEMS(%KeyField) = 1)
+    IF ERRORCODE()
+        #ELSE
+    IF ERRORCODE() |
+        #ENDIF
+        #FOR(%KeyField),WHERE(%KeyField <> %KeyAuto)
+          #IF(INSTANCE(%KeyField) = ITEMS(%KeyField) - 1)
+    OR Auto::Save:%KeyField <> %KeyField
+          #ELSE
+    OR Auto::Save:%KeyField <> %KeyField |
+          #ENDIF
+        #ENDFOR
+      Auto::Save:%KeyAuto = 1
+    ELSE
+      Auto::Save:%KeyAuto = %KeyAuto + 1
+    END
+      #ELSE
+    SET(%Key)
+        #FOR(%KeyField)
+          #IF(%KeyFieldSequence = 'ASCENDING')
+    PREVIOUS(%File)
+          #ELSE
+    NEXT(%File)
+          #ENDIF
+        #ENDFOR
+    IF ERRORCODE() AND ERRORCODE() <> BadRecErr
+      StandardWarning(Warn:RecordFetchError,'%File')
+      POST(Event:CloseWindow)
+      EXIT
+    END
+    IF ERRORCODE()
+      Auto::Save:%KeyAuto = 1
+    ELSE
+      Auto::Save:%KeyAuto = %KeyAuto + 1
+    END
+      #ENDIF
+    #INSERT(%SaveButtonRecordHandler,'RESET',%Primary)
+    %KeyAuto = Auto::Save:%KeyAuto
+    #INSERT(%SaveButtonRecordHandler,'SET',%Primary)
+    #ENDFOR
+    ADD(%Primary)
+    IF ERRORCODE()
+      Auto::Attempts += 1
+      IF Auto::Attempts = 3
+        IF StandardWarning(Warn:AutoIncError) = Button:Retry
+          Auto::Attempts = 0
+        ELSE
+          LocalResponse = RequestCancelled
+          EXIT
+        END
+      END
+      CYCLE
+    END
+    BREAK
+  END
+  #ENDIF
+#ENDAT
+#!----------------------------------------------------------------
+#GROUP(%SaveButtonRecordHandlingGather,%CurrentFile)
+#FIX(%HandledFile,%CurrentFile)
+#IF(%HandledFile=%Null)
+  #FIX(%File,%CurrentFile)
+  #ADD(%HandledFile,%CurrentFile)
+  #ADD(%ProcFilesUsed,%CurrentFile)
+  #SET(%InsertAction,'NORMAL')
+  #FOR(%Key),WHERE(%KeyAuto)
+    #SET(%InsertAction,'AUTO')
+    #BREAK
+  #ENDFOR
+  #FOR(%Relation),WHERE(%FileRelationType='1:1')
+    #INSERT(%SaveButtonRecordHandlingGather,%CurrentFile)
+  #ENDFOR
+#ENDIF
+#!----------------------------------------------------------------
+#GROUP(%SaveButtonRecordHandler,%CurrentSection,%CurrentFile)
+#FIX(%File,%HandledFile)
+#SET(%ValueConstruct,'SAV::' & %FilePrefix & ':Record')
+#CASE(%CurrentSection)
+#OF('DECLARE')
+  #IF(NOT(%FirstHandledValue))
+    #SET(%FirstHandledValue,%ValueConstruct)
+  #ENDIF
+  #SET(%LastHandledValue,%ValueConstruct)
+%[20]ValueConstruct STRING(SIZE(%FilePrefix:Record))
+#OF('SET')
+%ValueConstruct = %FilePrefix:Record
+#OF('RESET')
+%FilePrefix:Record = %ValueConstruct
+#OF('CHECK')
+#IF(%ValueConstruct = %FirstHandledValue)
+  #IF(%ValueConstruct = %LastHandledValue)
+IF %ValueConstruct <> %FilePrefix:Record
+  RecordChanged = True
+END
+  #ELSE
+IF %ValueConstruct <> %FilePrefix:Record |
+  #ENDIF
+#ELSE
+  #IF(%ValueConstruct = %LastHandledValue)
+OR %ValueConstruct <> %FilePrefix:Record
+  RecordChanged = True
+END
+  #ELSE
+OR %ValueConstruct <> %FilePrefix:Record |
+  #ENDIF
+#ENDIF
+#ENDCASE
+#FOR(%Field),WHERE(%FieldType = 'MEMO')
+  #SET(%ValueConstruct,'SAV::' & %Field)
+  #CASE(%CurrentSection)
+  #OF('DECLARE')
+%[20]ValueConstruct STRING(SIZE(%Field))
+    #SET(%LastHandledValue,%ValueConstruct)
+  #OF('SET')
+%ValueConstruct = %Field
+  #OF('RESET')
+%Field = %ValueConstruct
+  #OF('CHECK')
+    #IF(%ValueConstruct = %LastHandledValue)
+OR %ValueConstruct <> %Field
+  RecordChanged = True
+END
+    #ELSE
+OR %ValueConstruct <> %Field |
+    #ENDIF
+  #ENDCASE
+#ENDFOR
+#!----------------------------------------------------------------
+#CONTROL(DOSFileLookup,'Lookup a DOS file name'),WINDOW,HLP('~TPLControlDOSFileLookup')
+                     CONTROLS
+                       BUTTON('...'),AT(,,12,12),USE(?LookupFile)
+                     END
+#BOXED('DOS File Lookup Prompts')
+  #PROMPT('File Dialog Header:',@S60),%DOSFileDialogHeader,REQ,DEFAULT('Choose a File')
+  #PROMPT('DOS FileName Variable:',FIELD),%DOSFileField,REQ
+  #PROMPT('Default Directory:',@S80),%DOSInitialDirectory
+  #PROMPT('Variable File Mask',CHECK),%DOSVariableMask
+  #ENABLE(%DOSVariableMask)
+    #PROMPT('Variable Mask Value:',FIELD),%DOSVariableMaskValue
+  #ENDENABLE
+  #ENABLE(NOT %DOSVariableMask)
+    #PROMPT('File Mask Description:',@S40),%DOSMaskDesc,REQ,DEFAULT('All Files')
+    #PROMPT('File Mask',@S50),%DOSMask,REQ,DEFAULT('*.*')
+    #BUTTON('More File Masks'),MULTI(%DOSMoreMasks,%DOSMoreMaskDesc & ' - ' & %DOSMoreMask)
+      #PROMPT('File Mask Description:',@S40),%DOSMoreMaskDesc,REQ
+      #PROMPT('File Mask',@S50),%DOSMoreMask,REQ
+    #ENDBUTTON
+  #ENDENABLE
+#ENDBOXED
+#LOCALDATA
+DOSDialogHeader      CSTRING(40)
+DOSExtParameter      CSTRING(250)
+DOSTargetVariable    CSTRING(80)
+#ENDLOCALDATA
+#ATSTART
+  #DECLARE(%DOSExtensionParameter)
+  #DECLARE(%DOSLookupControl)
+  #FOR(%Control),WHERE(%ControlInstance = %ActiveTemplateInstance)
+    #SET(%DOSLookupControl,%Control)
+  #ENDFOR
+  #IF(%DOSVariableMask)
+    #SET(%DOSExtensionParameter,%DOSVariableMask)
+  #ELSE
+    #SET(%DOSExtensionParameter,%DOSMaskDesc & '|' & %DOSMask)
+    #FOR(%DOSMoreMasks)
+      #SET(%DOSExtensionParameter,%DOSExtensionParameter & '|' & %DOSMoreMaskDesc & '|' & %DOSMoreMask)
+    #ENDFOR
+  #END
+#ENDAT
+#AT(%ControlEventHandling,%DOSLookupControl,'Accepted')
+IF NOT %DOSFileField
+  #INSERT(%StandardValueAssignment,'DOSTargetVariable',%DOSInitialDirectory)
+ELSE
+  DOSTargetVariable = %DOSFileField
+END
+#INSERT(%StandardValueAssignment,'DOSDialogHeader',%DOSFileDialogHeader)
+#INSERT(%StandardValueAssignment,'DOSExtParameter',%DOSExtensionParameter)
+IF FILEDIALOG(DOSDialogHeader,DOSTargetVariable,DOSExtParameter,0)
+  %DOSFileField = DOSTargetVariable
+  DO RefreshWindow
+END
+#ENDAT
+#!----------------------------------------------------------------
+#CONTROL(FileDrop,'File-Loaded Drop Box'),PRIMARY('File Loaded Drop Box',OPTKEY),DESCRIPTION('File Loaded Drop Box on ' & %Primary),WINDOW,MULTI,HLP('~TPLControlFileDrop')
+   CONTROLS
+     LIST,DROP(5),FROM(Queue:FileDrop)
+   END
+#BUTTON('File Drop Properties')
+  #SHEET
+    #TAB('&General'),HLP('~TPLControlFileDrop_General')
+      #PROMPT('Field to &fill from:',FIELD(%Primary)),%FillField,PROMPTAT(,30)
+      #PROMPT('&Target field:',FIELD),%TargetField
+      #PROMPT('&Record filter:',@S255),%RecordFilter
+      #PROMPT('Default to first entry if USE variable empty',CHECK),%DefaultFill,AT(10,,180)
+    #ENDTAB
+    #TAB('&Range Limits'),WHERE(%PrimaryKey),HLP('~TPLControlFileDrop_Range_Limits')
+      #PROMPT('Range limit &field:',COMPONENT(%PrimaryKey)),%RangeField,PROMPTAT(,30)
+      #ENABLE(%RangeField)
+        #PROMPT('Range limit &type:',DROP('Current Value|Single Value|Range of Values|File Relationship')),%RangeLimitType,DEFAULT('Current Value')
+        #BOXED('Range limit boundary'),WHERE(%RangeLimitType='Single Value'),AT(,55)
+          #PROMPT('&Range limit value:',FIELD),%RangeLimit
+        #ENDBOXED
+        #BOXED('Range limit boundaries'),WHERE(%RangeLimitType='Range of Values'),AT(,55)
+          #PROMPT('&Low limit value:',FIELD),%RangeLow
+          #PROMPT('&High limit value:',FIELD),%RangeHigh
+        #ENDBOXED
+        #BOXED('Range limiting file'),WHERE(%RangeLimitType='File Relationship'),AT(,55)
+          #PROMPT('&Related file:',FILE),%RangeFile
+        #ENDBOXED
+      #ENDENABLE
+    #ENDTAB
+    #TAB('&Colors'),WHERE(%ControlHasColor),HLP('~TPLControlFileDrop_Colors')
+      #PREPARE
+        #FIND(%ControlInstance,%ActiveTemplateInstance,%Control)
+      #ENDPREPARE
+      #BUTTON('Customize Colors'),FROM(%ControlField,%ControlField),AT(,30),HLP('~TPLControlBrowseBox'),INLINE,WHERE(%ControlFieldHasColor)
+        #PREPARE
+          #FIND(%ControlInstance,%ActiveTemplateInstance,%Control)
+        #ENDPREPARE
+        #BOXED('Default Colors')
+          #PROMPT('&Foreground Normal:',COLOR),%ControlFieldForegroundNormal,DEFAULT(-1)
+          #PROMPT('&Background Normal:',COLOR),%ControlFieldBackgroundNormal,DEFAULT(-1)
+          #PROMPT('&Foreground Selected:',COLOR),%ControlFieldForegroundSelected,DEFAULT(-1)
+          #PROMPT('&Background Selected:',COLOR),%ControlFieldBackgroundSelected,DEFAULT(-1)
+        #ENDBOXED
+        #BOXED('Conditional Color Assignments')
+          #BUTTON('Conditional Color Assignments'),MULTI(%ConditionalColors,%ColorCondition),INLINE,HLP('~TPLControlFileDrop_Colors')
+            #PROMPT('&Condition:',@S255),%ColorCondition
+            #PROMPT('&Foreground Normal:',COLOR),%ConditionalControlFieldForegroundNormal,DEFAULT(-1)
+            #PROMPT('&Background Normal:',COLOR),%ConditionalControlFieldBackgroundNormal,DEFAULT(-1)
+            #PROMPT('&Foreground Selected:',COLOR),%ConditionalControlFieldForegroundSelected,DEFAULT(-1)
+            #PROMPT('&Background Selected:',COLOR),%ConditionalControlFieldBackgroundSelected,DEFAULT(-1)
+          #ENDBUTTON
+        #ENDBOXED
+      #ENDBUTTON
+    #ENDTAB
+    #TAB('&Icons'),WHERE(%ControlHasIcon),HLP('~TPLControlFileDrop_Icons')
+      #PREPARE
+        #FIND(%ControlInstance,%ActiveTemplateInstance,%Control)
+      #ENDPREPARE
+      #BUTTON('&Customize BrowseBox Icons'),FROM(%ControlField,%ControlField & ' - ' & %ControlFieldIcon),AT(,30),HLP('~TPLControlBrowseBox'),INLINE,WHERE(%ControlFieldHasIcon)
+        #PREPARE
+          #FIND(%ControlInstance,%ActiveTemplateInstance,%Control)
+        #ENDPREPARE
+        #BOXED('Default Icon')
+          #PROMPT('Icon:',@S40),%ControlFieldIcon
+        #ENDBOXED
+        #BOXED('Conditional Icon Usage')
+          #BUTTON('&Conditional Icon Usage'),MULTI(%ConditionalIcons,%IconCondition),INLINE,HLP('~TPLControlFileDrop_Icons')
+            #PROMPT('&Condition:',@S255),%IconCondition
+            #PROMPT('Icon:',@S40),%ConditionalControlFieldIcon
+          #ENDBUTTON
+        #ENDBOXED
+      #ENDBUTTON
+    #ENDTAB
+    #TAB('&Hot Fields'),HLP('~TPLControlFileDrop_Hot_Fields')
+      #BUTTON('Hot fields'),MULTI(%HotFields,%HotField),INLINE,AT(,30)
+        #PROMPT('&Hot field:',FIELD),%HotField
+        #PROMPT('&BIND field',CHECK),%HotFieldBound
+      #ENDBUTTON
+    #ENDTAB
+    #TAB('&Sort Fields'),HLP('~TPLControlFileDrop_Sort_Fields')
+      #BUTTON('Sort fields'),MULTI(%SortFields,%SortField),INLINE,AT(,30)
+        #PROMPT('Sort &field:',FIELD),%SortField
+      #ENDBUTTON
+    #ENDTAB
+  #ENDSHEET
+#ENDBUTTON
+#AT(%CustomGlobalDeclarations)
+  #INSERT(%FileControlSetFlags)
+#ENDAT
+#ATSTART
+  #DECLARE(%ListViewBoundField),UNIQUE
+  #INSERT(%FileDropStartInitialize)
+#ENDAT
+#AT(%DataSectionBeforeWindow)
+#INSERT(%FileDropDataSection)
+#ENDAT
+#AT(%WindowEventHandling,'OpenWindow')
+#INSERT(%FileDropWindowOpen)
+#ENDAT
+#AT(%ControlEventHandling,%DropControl,'Accepted')
+  #IF(%TargetField)
+GET(%DropQueue,CHOICE())
+%TargetField = %ValueName
+  #ENDIF
+#ENDAT
+#AT(%ProcedureRoutines)
+  #FIX(%Control,%DropControl)
+
+%InstancePrefix:FillList ROUTINE
+  FREE(%DropQueue)
+  #IF(%OldStyleFileDrop)
+    #IF ( %FillField = %FirstDropField )
+  %InstancePrefix:%FirstDropField = %ControlUse
+    #ENDIF
+  %Control{Prop:From} = %DropQueue
+    #IF ( %FillField = %FirstDropField )
+  %ControlUse = %InstancePrefix:%FirstDropField
+    #ENDIF
+  #ENDIF
+  #INSERT(%StandardViewFilter,%RecordFilter,%PrimaryKey,%RangeField,%RangeLimitType,%InstancePrefix & ':Save:',%Temp1,%Temp2,'Save')
+  SET(%LoadOrder)
+  #INSERT(%StandardWriteViewFilter,%DropViewFilter)
+  OPEN(%ListView)
+  IF ERRORCODE()
+    StandardWarning(Warn:ViewOpenError)
+  END
+  LOOP
+  #INSERT(%QueueFillLoop)
+    ADD(%DropQueue)
+  END
+  CLOSE(%ListView)
+  IF RECORDS(%DropQueue)
+  #IF(ITEMS(%SortFields))
+    #DECLARE(%SortList)
+    #SET(%SortList,'')
+    #FOR(%SortFields)
+      #IF(%SortList )
+        #SET(%SortList,%SortList & ',')
+      #ENDIF
+      #SET(%SortList,%SortList & %InstancePrefix & ':' & %SortField)
+    #ENDFOR
+    SORT(%DropQueue,%SortList)
+  #ELSE
+    #IF (NOT %PrimaryKey)
+    SORT(%DropQueue,%ValueName)
+    #ENDIF
+  #ENDIF
+    IF %ControlUse
+      LOOP %InstancePrefix:LoopIndex = 1 TO RECORDS(%DropQueue)
+        GET(%DropQueue,%InstancePrefix:LoopIndex)
+        IF %ControlUse = %InstancePrefix:%FirstDropField THEN BREAK.
+      END
+      %Control{Prop:Selected} = %InstancePrefix:LoopIndex
+  #IF(%DefaultFill)
+    ELSE
+      GET(%DropQueue,1)
+      %ControlUse = %InstancePrefix:%FirstDropField
+      %Control{Prop:Selected} = 1
+  #ENDIF
+    END
+  ELSE
+    CLEAR(%ControlUse)
+  END
+#ENDAT
+#GROUP (%FileDropWindowOpen)
+  #FOR(%ListViewBoundField)
+    #FIND(%Field,%ListViewBoundField)
+    #IF(NOT %FieldFile OR %FieldName)
+BIND('%ListViewBoundField',%ListViewBoundField)
+    #ENDIF
+  #ENDFOR
+#INSERT(%StandardViewFilter,%RecordFilter,%PrimaryKey,%RangeField,%RangeLimitType,%InstancePrefix & ':Save:',%Temp1,%Temp2,'Bind')
+  #FOR(%IconList),WHERE(%IconListType <> 'Variable')
+    #SET(%ValueConstruct,INSTANCE(%IconList))
+    #IF(%IconListType = 'Built-In')
+%DropControl{Prop:IconList,%ValueConstruct} = %IconList
+    #ELSIF(%IconListType = 'File')
+%DropControl{Prop:IconList,%ValueConstruct} = '%IconList'
+    #ENDIF
+  #ENDFOR
+DO %InstancePrefix:FillList
+#GROUP (%QueueFillLoop)
+  NEXT(%ListView)
+  IF ERRORCODE()
+    IF ERRORCODE() = BadRecErr
+      BREAK
+    ELSE
+      StandardWarning(Warn:RecordFetchError,'%Primary')
+      POST(Event:CloseWindow)
+      EXIT
+    END
+  END
+  #FOR (%QueueField)
+    #FIX(%ControlField,%QueueFieldAssignment)
+    #IF (%ControlField)
+  %QueueField = %QueueFieldAssignment
+      #IF (%ControlFieldHasColor)
+        #IF(ITEMS(%ConditionalColors))
+          #FOR(%ConditionalColors)
+            #IF(INSTANCE(%ConditionalColors) = 1)
+  IF (%ColorCondition)
+            #ELSE
+  ELSIF (%ColorCondition)
+            #ENDIF
+    %QueueField:NormalFG = %ConditionalControlFieldForegroundNormal
+    %QueueField:NormalBG = %ConditionalControlFieldBackgroundNormal
+    %QueueField:SelectedFG = %ConditionalControlFieldForegroundSelected
+    %QueueField:SelectedBG = %ConditionalControlFieldBackgroundSelected
+          #ENDFOR
+  ELSE
+    %QueueField:NormalFG = %ControlFieldForegroundNormal
+    %QueueField:NormalBG = %ControlFieldBackgroundNormal
+    %QueueField:SelectedFG = %ControlFieldForegroundSelected
+    %QueueField:SelectedBG = %ControlFieldBackgroundSelected
+  END
+        #ELSE
+  %QueueField:NormalFG = %ControlFieldForegroundNormal
+  %QueueField:NormalBG = %ControlFieldBackgroundNormal
+  %QueueField:SelectedFG = %ControlFieldForegroundSelected
+  %QueueField:SelectedBG = %ControlFieldBackgroundSelected
+        #ENDIF
+      #ENDIF
+      #IF (%ControlFieldHasIcon)
+        #IF(ITEMS(%ConditionalIcons))
+          #FOR(%ConditionalIcons)
+            #IF(INSTANCE(%ConditionalIcons) = 1)
+  IF (%IconCondition)
+            #ELSE
+  ELSIF (%IconCondition)
+            #ENDIF
+            #FIX(%IconList,%ConditionalControlFieldIcon)
+            #IF(%IconList)
+              #CASE(%IconListType)
+              #OF('Variable')
+    %QueueField:Icon = %IconList
+              #ELSE
+                #SET(%ValueConstruct,INSTANCE(%IconList))
+    %QueueField:Icon = %ValueConstruct
+              #ENDCASE
+            #ELSE
+    %QueueField:Icon = 0
+            #ENDIF
+          #ENDFOR
+  ELSE
+          #FIX(%IconList,%ControlFieldIcon)
+          #IF(%IconList)
+            #CASE(%IconListType)
+            #OF('Variable')
+    %QueueField:Icon = %IconList
+            #ELSE
+              #SET(%ValueConstruct,INSTANCE(%IconList))
+    %QueueField:Icon = %ValueConstruct
+            #ENDCASE
+          #ELSE
+    %QueueField:Icon = 0
+          #ENDIF
+  END
+        #ELSE
+          #FIX(%IconList,%ControlFieldIcon)
+          #IF(%IconList)
+            #CASE(%IconListType)
+            #OF('Variable')
+    %QueueField:Icon = %IconList
+            #ELSE
+              #SET(%ValueConstruct,INSTANCE(%IconList))
+    %QueueField:Icon = %ValueConstruct
+            #ENDCASE
+          #ELSE
+    %QueueField:Icon = 0
+          #ENDIF
+        #ENDIF
+      #ENDIF
+    #ELSE
+      #FIND(%Field,%QueueFieldAssignment)
+      #IF (%Field)
+  %QueueField = %QueueFieldAssignment
+      #ENDIF
+    #ENDIF
+  #ENDFOR
+  #IF ( %FillField <> %FirstDropField AND %TargetField )
+  IF ~%ControlUse AND %TargetField = %InstancePrefix:%FillField THEN
+    %ControlUse = %InstancePrefix:%FirstDropField
+  END
+  #ENDIF
+#! A file loaded drop combo box
+#! Combo may only have one populated field
+#! Target field may either be same as populated or different
+#! In absence of use value call up form (optionally)
+#CONTROL(FileDropCombo,'File-Loaded Drop Combo'),PRIMARY('File Loaded Drop Combo',OPTKEY),DESCRIPTION('File Loaded Drop Combo on ' & %Primary),WINDOW,MULTI,HLP('~TPLControlFileDropCombo')
+   CONTROLS
+     COMBO(@s20),DROP(5),FROM(Queue:FileDropCombo)
+   END
+#BUTTON('File Drop Combo Properties')
+  #SHEET
+    #TAB('&General'),HLP('~TPLControlFileDropCombo_General')
+      #PROMPT('Field to &fill from:',FIELD(%Primary)),%FillField,PROMPTAT(,30)
+      #PROMPT('&Target field:',FIELD),%TargetField
+      #PROMPT('&Record filter:',@S255),%RecordFilter
+      #PROMPT('R&emove duplicate entries',CHECK),%RemoveDuplicates,AT(10,,180)
+      #PROMPT('Default to first entry if USE variable empty',CHECK),%DefaultFill,AT(10,,180)
+    #ENDTAB
+    #TAB('&Range Limits'),WHERE(%PrimaryKey),HLP('~TPLControlFileDropCombo_Range_Limits')
+      #PROMPT('Range limit &field:',COMPONENT(%PrimaryKey)),%RangeField,PROMPTAT(,30)
+      #ENABLE(%RangeField)
+        #PROMPT('Range limit &type:',DROP('Current Value|Single Value|Range of Values|File Relationship')),%RangeLimitType,DEFAULT('Current Value')
+        #BOXED('Range limit boundary'),WHERE(%RangeLimitType='Single Value'),AT(,55)
+          #PROMPT('&Range limit value:',FIELD),%RangeLimit
+        #ENDBOXED
+        #BOXED('Range limit boundaries'),WHERE(%RangeLimitType='Range of Values'),AT(,55)
+          #PROMPT('&Low limit value:',FIELD),%RangeLow
+          #PROMPT('&High limit value:',FIELD),%RangeHigh
+        #ENDBOXED
+        #BOXED('Range limiting file'),WHERE(%RangeLimitType='File Relationship'),AT(,55)
+          #PROMPT('&Related file:',FILE),%RangeFile
+        #ENDBOXED
+      #ENDENABLE
+    #ENDTAB
+    #TAB('&Colors'),WHERE(%ControlHasColor),HLP('~TPLControlFileDropCombo_Colors')
+      #PREPARE
+        #FIND(%ControlInstance,%ActiveTemplateInstance,%Control)
+      #ENDPREPARE
+      #BUTTON('Customize Colors'),FROM(%ControlField,%ControlField),AT(,30),HLP('~TPLControlBrowseBox'),INLINE,WHERE(%ControlFieldHasColor)
+        #PREPARE
+          #FIND(%ControlInstance,%ActiveTemplateInstance,%Control)
+        #ENDPREPARE
+        #BOXED('Default Colors')
+          #PROMPT('&Foreground Normal:',COLOR),%ControlFieldForegroundNormal,DEFAULT(-1)
+          #PROMPT('&Background Normal:',COLOR),%ControlFieldBackgroundNormal,DEFAULT(-1)
+          #PROMPT('&Foreground Selected:',COLOR),%ControlFieldForegroundSelected,DEFAULT(-1)
+          #PROMPT('&Background Selected:',COLOR),%ControlFieldBackgroundSelected,DEFAULT(-1)
+        #ENDBOXED
+        #BOXED('Conditional Color Assignments')
+          #BUTTON('Conditional Color Assignments'),MULTI(%ConditionalColors,%ColorCondition),INLINE,HLP('~TPLControlFileDropCombo_Colors')
+            #PROMPT('&Condition:',@S255),%ColorCondition
+            #PROMPT('&Foreground Normal:',COLOR),%ConditionalControlFieldForegroundNormal,DEFAULT(-1)
+            #PROMPT('&Background Normal:',COLOR),%ConditionalControlFieldBackgroundNormal,DEFAULT(-1)
+            #PROMPT('&Foreground Selected:',COLOR),%ConditionalControlFieldForegroundSelected,DEFAULT(-1)
+            #PROMPT('&Background Selected:',COLOR),%ConditionalControlFieldBackgroundSelected,DEFAULT(-1)
+          #ENDBUTTON
+        #ENDBOXED
+      #ENDBUTTON
+    #ENDTAB
+    #TAB('&Icons'),WHERE(%ControlHasIcon),HLP('~TPLControlFileDropCombo_Icons')
+      #PREPARE
+        #FIND(%ControlInstance,%ActiveTemplateInstance,%Control)
+      #ENDPREPARE
+      #BUTTON('&Customize BrowseBox Icons'),FROM(%ControlField,%ControlField & ' - ' & %ControlFieldIcon),AT(,30),INLINE,WHERE(%ControlFieldHasIcon),HLP('~TPLControlFileDropCombo_Icons')
+        #PREPARE
+          #FIND(%ControlInstance,%ActiveTemplateInstance,%Control)
+        #ENDPREPARE
+        #BOXED('Default Icon')
+          #PROMPT('Icon:',@S40),%ControlFieldIcon
+        #ENDBOXED
+        #BOXED('Conditional Icon Usage')
+          #BUTTON('&Conditional Icon Usage'),MULTI(%ConditionalIcons,%IconCondition),INLINE,HLP('~TPLControlFileDropCombo_Icons')
+            #PROMPT('&Condition:',@S255),%IconCondition
+            #PROMPT('Icon:',@S40),%ConditionalControlFieldIcon
+          #ENDBUTTON
+        #ENDBOXED
+      #ENDBUTTON
+    #ENDTAB
+    #TAB('&Update Behavior'),HLP('~TPLControlFileDropCombo_Update_Behavior')
+      #PROMPT('&Allow updates',CHECK),%AllowUpdate,AT(,30)
+      #ENABLE(%AllowUpdate)
+        #PROMPT('&Update procedure:',PROCEDURE),%UpdateProcedure
+        #PROMPT('Prompt &caption:',@s80),%PromptCaption,DEFAULT('Record not found')
+        #PROMPT('&Prompt text:',@s80),%PromptText,DEFAULT('Add new record?')
+      #ENDENABLE
+    #ENDTAB
+    #TAB('&Hot Fields'),HLP('~TPLControlFileDropCombo_Hot_Fields')
+      #BUTTON('Hot Fields'),MULTI(%HotFields,%HotField),INLINE,AT(,30)
+        #PROMPT('&Hot field:',FIELD),%HotField
+        #PROMPT('&BIND field',CHECK),%HotFieldBound
+      #ENDBUTTON
+    #ENDTAB
+  #ENDSHEET
+#ENDBUTTON
+#AT(%CustomGlobalDeclarations)
+  #INSERT(%FileControlSetFlags)
+#ENDAT
+#ATSTART
+  #DECLARE(%ListViewBoundField),UNIQUE
+  #DECLARE(%SortFields),MULTI
+  #FREE(%SortFields)
+  #INSERT(%FileDropStartInitialize)
+#ENDAT
+
+#AT(%DataSectionBeforeWindow)
+#INSERT(%FileDropDataSection)
+#ENDAT
+
+#AT(%WindowEventHandling,'OpenWindow')
+#INSERT(%FileDropWindowOpen)
+#ENDAT
+#AT(%ControlEventHandling,%DropControl,'Accepted')
+  #FIX(%Control,%DropControl)
+%InstancePrefix:%FirstDropField = %ControlUse
+GET(%DropQueue,%InstancePrefix:%FirstDropField)
+IF ERRORCODE() THEN
+  #IF (%AllowUpdate)
+    #IF (%PromptCaption OR %PromptText)
+  IF MESSAGE('%PromptText','%PromptCaption',ICON:Question,BUTTON:Yes+BUTTON:No) <> BUTTON:Yes THEN
+    SELECT(%DropControl)
+    CYCLE
+  END
+    #ENDIF
+  GET(%Primary,0)
+    #FIX(%File,%Primary)
+  CLEAR(%FilePrefix:Record)
+    #FOR(%Field),WHERE(%FieldType = 'MEMO')
+  CLEAR(%Field)
+    #ENDFOR
+    #FOR(%Field),WHERE(%FieldType = 'BLOB')
+  %Field{Prop:Size} = 0
+    #ENDFOR
+    #FIX(%Control,%DropControl)
+  %FirstDropField = %ControlUse
+    #IF ( %RangeLimit )
+  %RangeField = %RangeLimit
+    #ENDIF
+    #IF (%UpdateProcedure)
+  LocalRequest = InsertRecord
+  GlobalRequest = LocalRequest
+  %UpdateProcedure
+  LocalResponse = GlobalResponse
+  IF LocalResponse = RequestCompleted THEN
+    DO %InstancePrefix:FillList
+    POST(Event:Accepted,%DropControl)
+  ELSE
+    SELECT(%DropControl)
+  END
+    #ELSE
+      #FIX(%File,%Primary)
+      #FOR (%Relation), WHERE(%FileRelationType = 'MANY:1')
+        #ERROR('Unable to handle MANY:1 related files')
+      #ENDFOR
+      #FOR (%Key), WHERE(%KeyExcludeNulls)
+        #FOR (%KeyField)
+          #IF ( %KeyField <> %FirstDropField AND %KeyField <> %RangeLimit )
+            #ERROR('Unable to fill all non-null field:'&%KeyField)
+          #ENDIF
+        #ENDFOR
+      #ENDFOR
+      #FOR (%Key), WHERE(%KeyAuto)
+        #ERROR('Unable to handle auto-increment key'&%Key)
+      #ENDFOR
+  ADD(%Primary)
+  IF ~ERRORCODE() THEN
+    DO %InstancePrefix:FillList
+    POST(Event:Accepted,%DropControl)
+  ELSE
+    SELECT(%DropControl)
+  END
+    #ENDIF
+  #ELSE
+  SELECT(%DropControl)
+  #ENDIF
+  #IF ( %TargetField )
+ELSE
+  %TargetField = %ValueName
+  #ENDIF
+END
+#ENDAT
+#AT(%ProcedureRoutines)
+  #FIX(%Control,%DropControl)
+%InstancePrefix:FillList ROUTINE
+  FREE(%DropQueue)
+  #IF ( %FillField = %FirstDropField )
+  %InstancePrefix:%FirstDropField = %ControlUse
+  #ENDIF
+  #IF ( %FillField = %FirstDropField )
+  %ControlUse = %InstancePrefix:%FirstDropField
+  #ENDIF
+  #INSERT(%StandardViewFilter,%RecordFilter,%PrimaryKey,%RangeField,%RangeLimitType,%InstancePrefix & ':Save:',%Temp1,%Temp2,'Save')
+  SET(%LoadOrder)
+  #INSERT(%StandardWriteViewFilter,%DropViewFilter)
+  OPEN(%ListView)
+  IF ERRORCODE()
+    StandardWarning(Warn:ViewOpenError)
+  END
+  LOOP
+  #INSERT(%QueueFillLoop)
+  #IF (%RemoveDuplicates)
+    GET(%DropQueue,%InstancePrefix:%FirstDropField)
+    IF ERRORCODE() THEN
+      ADD(%DropQueue,%InstancePrefix:%FirstDropField)
+    END
+  #ELSE
+    ADD(%DropQueue)
+  #ENDIF
+  END
+  CLOSE(%ListView)
+  IF RECORDS(%DropQueue)
+    SORT(%DropQueue,%InstancePrefix:%FirstDropField)
+    IF %ControlUse
+      LOOP %InstancePrefix:LoopIndex = 1 TO RECORDS(%DropQueue)
+        GET(%DropQueue,%InstancePrefix:LoopIndex)
+        IF %ControlUse = %InstancePrefix:%FirstDropField THEN BREAK.
+      END
+      %Control{Prop:Selected} = %InstancePrefix:LoopIndex
+  #IF(%DefaultFill)
+    ELSE
+      GET(%DropQueue,1)
+      %ControlUse = %InstancePrefix:%FirstDropField
+      %Control{Prop:Selected} = 1
+  #ENDIF
+    END
+  ELSE
+    CLEAR(%ControlUse)
+  END
+#ENDAT
+#GROUP(%FileDropStartInitialize)
+  #INSERT(%FileControlInitialize)
+  #DECLARE(%DropControl)
+  #DECLARE(%DropQueue)
+  #DECLARE(%LoadOrder)
+  #DECLARE(%ValueName)
+  #DECLARE(%DropViewFilter)
+  #DECLARE(%Temp1)
+  #DECLARE(%Temp2)
+  #CASE(%RangeLimitType)
+  #OF('Range of Values')
+    #SET(%Temp1,%RangeLow)
+    #SET(%Temp2,%RangeHigh)
+  #OF('Single Value')
+    #SET(%Temp1,%RangeLimit)
+  #OF('File Relationship')
+    #SET(%Temp1,%RangeFile)
+  #ENDCASE
+  #FIX(%File,%Primary)
+  #IF (%PrimaryKey)
+    #SET(%LoadOrder,%PrimaryKey)
+  #ELSE
+    #SET(%LoadOrder,%File)
+    #FOR(%Key),WHERE(%KeyPrimary)
+      #SET(%LoadOrder,%Key)
+    #ENDFOR
+  #ENDIF
+  #DECLARE(%InstancePrefix)
+  #DECLARE(%OldStyleFileDrop)
+  #SET(%InstancePrefix,'FLD' & %ActiveTemplateInstance & ':')
+  #FOR(%Control),WHERE(%ControlInstance=%ActiveTemplateInstance)
+    #SET(%DropControl,%Control)
+    #SET(%ValueConstruct,EXTRACT(%ControlStatement,'FROM',1))
+    #IF(INSTRING('|',%ValueConstruct,1,1))
+      #SET(%DropQueue,%InstancePrefix & ':Queue')
+      #SET(%OldStyleFileDrop,%True)
+    #ELSE
+      #SET(%DropQueue,%ValueConstruct)
+      #SET(%OldStyleFileDrop,%False)
+    #ENDIF
+  #ENDFOR
+  #DECLARE(%IconList),UNIQUE
+  #DECLARE(%IconListType,%IconList)
+  #DECLARE(%QueueField),MULTI
+  #DECLARE(%QueueFieldAssignment,%QueueField)
+  #DECLARE(%ListView)
+  #DECLARE(%FillVisible,%False)
+  #INSERT(%StandardViewFilter,%RecordFilter,%PrimaryKey,%RangeField,%RangeLimitType,%InstancePrefix & ':Save:',%Temp1,%Temp2,'Construct')
+  #SET(%DropViewFilter,%ValueConstruct)
+  #SET(%ListView,%InstancePrefix & ':View')
+  #SET(%ValueName,%InstancePrefix & ':' & %FillField)
+  #FIX(%Control,%DropControl)
+  #FOR(%ControlField),WHERE(%ControlField)
+    #IF (%ControlField = %FillField)
+      #SET(%FillVisible,%True)
+    #ENDIF
+    #SET(%ValueConstruct,%InstancePrefix & ':' & %ControlField)
+    #IF (~%ValueName)
+      #SET(%ValueName,%ValueConstruct)
+    #ENDIF
+    #ADD(%QueueField,%ValueConstruct)
+    #SET(%QueueFieldAssignment,%ControlField)
+    #IF(%ControlFieldHasColor)
+      #ADD(%QueueField,%ValueConstruct&':NormalFG')
+      #SET(%QueueFieldAssignment,-1)
+      #ADD(%QueueField,%ValueConstruct&':NormalBG')
+      #SET(%QueueFieldAssignment,-1)
+      #ADD(%QueueField,%ValueConstruct&':SelectedFG')
+      #SET(%QueueFieldAssignment,-1)
+      #ADD(%QueueField,%ValueConstruct&':SelectedBG')
+      #SET(%QueueFieldAssignment,-1)
+    #ENDIF
+    #IF(%ControlFieldHasIcon)
+      #IF(%ControlFieldIcon)
+        #INSERT(%AddBrowseIcon,%ControlFieldIcon)
+        #FOR(%ConditionalIcons)
+          #INSERT(%AddBrowseIcon,%ConditionalControlFieldIcon)
+        #ENDFOR
+      #ENDIF
+      #ADD(%QueueField,%ValueConstruct&':Icon')
+      #SET(%QueueFieldAssignment,0)
+    #ENDIF
+  #ENDFOR
+  #IF (~%FillVisible)
+    #ADD(%QueueField,%InstancePrefix & ':' & %FillField)
+    #SET(%QueueFieldAssignment,%FillField)
+  #ENDIF
+  #FOR(%SortFields)
+    #SET(%ValueConstruct,%InstancePrefix & ':' & %SortField)
+    #IF ( NOT INLIST(%ValueConstruct,%QueueField) )
+      #ADD(%QueueField,%ValueConstruct)
+      #SET(%QueueFieldAssignment,%SortField)
+    #ENDIF
+  #ENDFOR
+  #FOR(%HotFields)
+    #SET(%ValueConstruct,%InstancePrefix & ':' & %HotField)
+    #FIX(%QueueField,%ValueConstruct)
+    #IF(%QueueField <> %ValueConstruct)
+      #ADD(%QueueField,%ValueConstruct)
+      #SET(%QueueFieldAssignment,%HotField)
+    #ENDIF
+    #IF ( %HotFieldBound )
+      #ADD(%ListViewBoundField,%HotField)
+    #ENDIF
+  #ENDFOR
+  #FIX(%File,%Primary)
+  #FIX(%Key,%PrimaryKey)
+  #FOR(%KeyField)
+    #SET(%ValueConstruct,%InstancePrefix & ':' & %KeyField)
+    #FIX(%QueueField,%ValueConstruct)
+    #IF(%QueueField <> %ValueConstruct)
+      #ADD(%QueueField,%ValueConstruct)
+      #SET(%QueueFieldAssignment,%KeyField)
+    #ENDIF
+  #ENDFOR
+  #FOR(%ListViewBoundField)
+    #SET(%ValueConstruct,%InstancePrefix & ':' & %ListViewBoundField)
+    #FIX(%QueueField,%ValueConstruct)
+    #IF(%QueueField<>%ValueConstruct)
+      #ADD(%QueueField,%ValueConstruct)
+      #SET(%QueueFieldAssignment,%ListViewBoundField)
+    #ENDIF
+  #ENDFOR
+  #IF ( ~%FillField )
+    #FIX(%Control,%DropControl)
+    #IF ( ITEMS(%ControlField) )
+      #SELECT(%ControlField,1)
+      #SET(%FillField,%ControlField)
+    #ELSIF ( %ControlUse )
+      #SET(%FillField,%ControlUse)
+    #ENDIF
+  #ENDIF
+  #DECLARE(%FirstDropField)
+  #FIX(%Control,%DropControl)
+  #IF ( ITEMS(%ControlField) )
+    #SELECT(%ControlField,1)
+    #SET(%FirstDropField,%ControlField)
+  #ELSE
+    #SET(%FirstDropField,%FillField)
+  #ENDIF
+#!------------------------------------------------------------------------------
+#GROUP(%FileDropDataSection)
+#INSERT(%ConstructView)
+%[20]DropQueue QUEUE,PRE
+#FOR(%QueueField),WHERE(%QueueField)
+  #FIND(%Field,%QueueFieldAssignment)
+  #IF (%Field)
+%[22]QueueField LIKE(%QueueFieldAssignment)
+  #ELSE
+%[22]QueueField LONG
+  #ENDIF
+#ENDFOR
+%[20]Null END
+    #SET(%ValueConstruct,%InstancePrefix & ':LoopIndex')
+%[20]ValueConstruct LONG,AUTO
+#INSERT(%StandardViewFilter,%RecordFilter,%PrimaryKey,%RangeField,%RangeLimitType,%InstancePrefix & ':Save:',%Temp1,%Temp2,'Declare')
+#!----------------------------------------------------------------
+#CONTROL(FieldLookupButton,'Trigger an Entry Control Lookup'),DESCRIPTION('Trigger an Entry Control Lookup'),WINDOW,MULTI,HLP('~TPLControlFieldLookupButton')
+   CONTROLS
+     BUTTON('...'),AT(,,12,12),USE(?CallLookup)
+   END
+#BOXED('Field Lookup Button Prompts')
+  #PROMPT('Control with lookup:',CONTROL),%ControlToLookup
+#ENDBOXED
+#ATSTART
+  #DECLARE(%LookupControl)
+  #FOR(%Control),WHERE(%ControlInstance=%ActiveTemplateInstance)
+    #SET(%LookupControl,%Control)
+  #ENDFOR
+  #FIX(%Control,%ControlToLookup)
+  #IF(%ControlType<>'ENTRY')
+    #ERROR(%Procedure & 'Error: File Lookup needs to refer to Entry Control')
+  #ENDIF
+  #IF(NOT %PreLookupKey AND NOT %PostLookupKey)
+    #ERROR(%Procedure & 'Error: File Lookup needs Entry Control to perform a Pre or Post-Edit lookup')
+  #ENDIF
+#ENDAT
+#AT(%ControlEventHandling,%LookupControl,'Accepted')
+  #FIX(%Control,%ControlToLookup)
+  #IF(NOT %PostLookupKey)
+    #FIND(%Field,%ControlUse)
+    #FOR(%Relation),WHERE(%RelationKey = %PreLookupKey)
+      #IF(%FileRelationType = 'MANY:1')
+        #FOR(%FileKeyField),WHERE(%FileKeyFieldLink)
+          #IF(%FileKeyFieldLink = %PreLookupField)
+            #BREAK
+          #ENDIF
+%FileKeyFieldLink = %FileKeyField
+        #ENDFOR
+      #ENDIF
+    #ENDFOR
+%PreLookupField = %ControlUse
+GlobalRequest = SelectRecord
+%PreLookupProcedure
+LocalResponse = GlobalResponse
+IF LocalResponse = RequestCompleted
+    #FIND(%Field,%ControlUse)
+    #FOR(%Relation),WHERE(%RelationKey = %PreLookupKey)
+      #IF(%FileRelationType = 'MANY:1')
+        #FOR(%FileKeyField),WHERE(%FileKeyFieldLink)
+          #IF(%FileKeyFieldLink = %PreLookupField)
+            #BREAK
+          #ENDIF
+  %FileKeyField = %FileKeyFieldLink
+        #ENDFOR
+      #ENDIF
+    #ENDFOR
+  %ControlUse = %PreLookupField
+END
+  #ELSE
+    #FOR(%Relation),WHERE(%RelationKey = %PostLookupKey)
+      #IF(%FileRelationType = 'MANY:1')
+        #FOR(%FileKeyField),WHERE(%FileKeyFieldLink)
+          #IF(%FileKeyFieldLink = %PostLookupField)
+            #BREAK
+          #ENDIF
+%FileKeyFieldLink = %FileKeyField
+        #ENDFOR
+      #ENDIF
+    #ENDFOR
+%PostLookupField = %ControlUse
+GlobalRequest = SelectRecord
+%PostLookupProcedure
+LocalResponse = GlobalResponse
+IF LocalResponse = RequestCompleted
+    #FOR(%Relation),WHERE(%RelationKey = %PostLookupKey)
+      #IF(%FileRelationType = 'MANY:1')
+        #FOR(%FileKeyField),WHERE(%FileKeyFieldLink)
+          #IF(%FileKeyFieldLink = %PostLookupField)
+            #BREAK
+          #ENDIF
+  %FileKeyField = %FileKeyFieldLink
+        #ENDFOR
+      #ENDIF
+    #ENDFOR
+  %ControlUse = %PostLookupField
+END
+  #ENDIF
+ForceRefresh = True
+LocalRequest = OriginalRequest
+DO RefreshWindow
+#FIX(%Control,%LookupControl)
+#ENDAT

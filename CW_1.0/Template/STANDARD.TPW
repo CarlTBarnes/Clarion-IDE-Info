@@ -1,0 +1,418 @@
+#!-------------------------------------------------------------------------
+#GROUP(%StandardSecondaryLookups),AUTO
+#MESSAGE('Secondary Lookups',3)
+#DECLARE(%MatchedKey)
+#DECLARE(%ParentKey)
+#DECLARE(%ChildKey)
+#FOR(%Secondary)
+  #FIX(%File,%Secondary)
+  #FIX(%Relation,%SecondaryTo)
+  #IF(%FileRelationType = '1:MANY')
+    #FOR(%RelationKeyField),WHERE(%RelationKeyFieldLink AND %RelationKeyField)
+%RelationKeyFieldLink = %RelationKeyField  #<! Assign linking field value
+    #ENDFOR
+GET(%File,%FileKey)                  #<! Lookup record
+IF ERRORCODE()
+  CLEAR(%FilePrefix:Record)          #<! Clear record if unsuccessful
+  #FOR(%Field),WHERE(%FieldType='MEMO')
+  CLEAR(%Field)
+  #ENDFOR
+END
+  #ELSIF(%FileRelationType = 'MANY:1')
+    #SET(%MatchedKey,%True)
+    #SUSPEND
+    #FOR(%RelationKeyField)
+      #IF(%RelationKeyFieldLink AND %RelationKeyField)
+#?%RelationKeyFieldLink = %RelationKeyField  #<! Assign linking field value
+      #ELSE
+        #SET(%MatchedKey,%False)
+      #ENDIF
+    #ENDFOR
+    #IF(%MatchedKey)
+      #SET(%ParentKey,%RelationKey)
+      #SET(%ChildKey,%FileKey)
+#?GET(%File,%FileKey)                  #<! Lookup record
+#?IF ERRORCODE()
+  #?CLEAR(%FilePrefix:Record)          #<! Clear record if unsuccessful
+  #FOR(%Field),WHERE(%FieldType='MEMO')
+  #?CLEAR(%Field)
+  #ENDFOR
+#?END
+      #FIND(%Key,%ParentKey)
+      #IF(NOT %KeyDuplicate)
+        #FIND(%Key,%ChildKey)
+        #IF(NOT %KeyDuplicate)
+          #RELEASE
+        #ENDIF
+      #ENDIF
+    #ENDIF
+    #RESUME
+  #ENDIF
+#ENDFOR
+#EMBED(%LookupRelated,'Lookup Related Records'),HLP('TPLEmbedLookupRelated')
+#!-------------------------------------------------------------------------
+#GROUP(%StandardWindowOpening)
+#MESSAGE('Standard Window Opening',3)
+#EMBED(%BeforeWindowOpening,'Before Opening the Window'),DATA
+OPEN(%Window)
+WindowOpened=True
+#IF(%INIActive AND %INISaveWindow)
+INIRestoreWindow('%Procedure','%INIFileName')
+#ENDIF
+#EMBED(%AfterWindowOpening,'After Opening the Window'),DATA
+#!-------------------------------------------------------------------------
+#GROUP(%StandardWindowClosing)
+#MESSAGE('Standard Window Closing',3)
+#EMBED(%BeforeWindowClosing,'Before Closing the Window')
+IF WindowOpened
+#IF(%INIActive AND %INISaveWindow)
+  INISaveWindow('%Procedure','%INIFileName')
+#ENDIF
+  CLOSE(%Window)
+END
+#EMBED(%AfterWindowClosing,'After Closing the Window')
+#!-------------------------------------------------------------------------
+#GROUP(%StandardControlHandling)
+#FOR(%Control),WHERE(%Control)
+  #MESSAGE('Control Handling: ' & %Control,3)
+  #SUSPEND
+#?OF %Control
+  #EMBED(%ControlPreEventCaseHandling,'Control Handling, before event handling'),%Control
+  #?CASE EVENT()
+    #FOR(%ControlEvent)
+      #SUSPEND
+  #?OF EVENT:%ControlEvent
+    #EMBED(%ControlPreEventHandling,'Control Event Handling, before generated code'),%Control,%ControlEvent
+    #INSERT(%FieldTemplateStandardHandling)
+    #EMBED(%ControlEventHandling,'Internal Control Event Handling'),%Control,%ControlEvent,HIDE
+    #EMBED(%ControlPostEventHandling,'Control Event Handling, after generated code'),%Control,%ControlEvent
+      #RESUME
+    #ENDFOR
+    #SUSPEND
+  #?ELSE
+    #EMBED(%ControlOtherEventHandling,'Other Control Event Handling'),%Control
+    #RESUME
+  #?END
+  #EMBED(%ControlPostEventCaseHandling,'Control Handling, after event handling'),%Control
+  #RESUME
+#ENDFOR
+#!
+#!-------------------------------------------------------------------------
+#GROUP(%StandardWindowHandling)
+#FOR(%WindowEvent)
+  #SUSPEND
+#?OF EVENT:%WindowEvent
+  #EMBED(%WindowEventHandling,'Window Event Handling'),%WindowEvent
+  #CASE(%WindowEvent)
+  #OF('OpenWindow')
+  IF NOT WindowInitialized
+    DO InitializeWindow
+    WindowInitialized = True
+  END
+    #IF(%FirstField)
+  SELECT(%FirstField)
+    #ENDIF
+  #OF('GainFocus')
+  IF NOT WindowInitialized
+    WindowInitialized = True
+    DO InitializeWindow
+  ELSE
+    ForceRefresh = True
+    DO RefreshWindow
+  END
+  #ENDCASE
+  #RESUME
+#ENDFOR
+#SUSPEND
+#?ELSE
+  #EMBED(%WindowOtherEventHandling,'Other Window Event Handling')
+#RESUME
+#!-------------------------------------------------------------------------
+#GROUP(%StandardFormula,%RequestedClass)
+  #FOR(%Formula),WHERE(%FormulaClass = %RequestedClass)
+#INSERT(%ExpandFormula,1)
+  #ENDFOR
+#!-------------------------------------------------------------------------
+#GROUP(%ExpandFormula,%CurrentElement)
+  #DECLARE(%LastElement)
+  #SET(%LastElement,INSTANCE(%FormulaExpression))
+  #SELECT(%FormulaExpression,%CurrentElement)
+  #CASE(%FormulaExpressionType)
+  #OF('=')
+    #IF(%FormulaExpression)
+%Formula = %FormulaExpression
+    #ELSE
+CLEAR(%Formula)
+    #ENDIF
+  #OF('IF')
+IF (%FormulaExpression)
+  #INSERT(%ExpandFormula,%FormulaExpressionTrue)
+ELSE
+  #INSERT(%ExpandFormula,%FormulaExpressionFalse)
+END
+  #OF('CASE')
+CASE (%FormulaExpression)
+  #INSERT(%ExpandFormulaCase,%FormulaExpressionCase)
+END
+  #ENDCASE
+#SELECT(%FormulaExpression,%LastElement)
+#!-------------------------------------------------------------------------
+#GROUP(%ExpandFormulaCase,%CurrentElement)
+  #SELECT(%FormulaExpression,%CurrentElement)
+  #LOOP WHILE(%CurrentElement)
+    #IF(%CurrentElement=0)
+      #BREAK
+    #ENDIF
+    #SET(%CurrentElement,%FormulaExpressionCase)
+OF %FormulaExpression
+  #INSERT(%ExpandFormula,%FormulaExpressionOf)
+#SELECT(%FormulaExpression,%FormulaExpressionCase)
+  #ENDLOOP
+#!-------------------------------------------------------------------------
+#GROUP(%StandardThreadInitialize,%ThreadProcedure,%InitThreadName)
+  #IF(%InitThreadName)
+    #FIND(%ThreadName,%InitThreadName)
+  #ENDIF
+IF START(%ThreadProcedure).
+#!-------------------------------------------------------------------------
+#GROUP(%StandardReportGeneration),AUTO
+#MESSAGE('Standard Report Generation',3)
+#DECLARE(%NewReportStatement)
+#DECLARE(%Indentation,LONG)
+#DECLARE(%TestValue)
+#DECLARE(%ReportControlSourceLine)
+#DECLARE(%CurrentLineBeginStructure)
+#DECLARE(%PreviousLineBeginStructure)
+#EMBED(%DataSectionBeforeReport,'Data Section, Before Report Declaration'),DATA
+%[20]Report %ReportStatement
+#SET(%Indentation,0)
+#SET(%CurrentLineBeginStructure,%False)
+#FOR(%ReportControl)
+  #IF(%ReportControlIndent<%Indentation)
+    #LOOP
+      #SET(%Indentation,%Indentation-1)
+%[22+(2*%Indentation)]Null END
+      #IF(%ReportControlIndent=%Indentation)
+        #BREAK
+      #ENDIF
+    #ENDLOOP
+  #ENDIF
+%[22+(2*%Indentation)]ReportControlLabel %ReportControlStatement
+  #IF(SUB(%ReportControlStatement,1,6)='HEADER')
+    #SET(%Indentation,%Indentation+1)
+  #ELSIF(SUB(%ReportControlStatement,1,6)='FOOTER')
+    #SET(%Indentation,%Indentation+1)
+  #ELSIF(SUB(%ReportControlStatement,1,6)='DETAIL')
+    #SET(%Indentation,%Indentation+1)
+  #ELSIF(SUB(%ReportControlStatement,1,6)='OPTION')
+    #SET(%Indentation,%Indentation+1)
+  #ELSIF(SUB(%ReportControlStatement,1,5)='GROUP')
+    #SET(%Indentation,%Indentation+1)
+  #ELSIF(SUB(%ReportControlStatement,1,5)='BREAK')
+    #SET(%Indentation,%Indentation+1)
+  #ELSIF(SUB(%ReportControlStatement,1,4)='FORM')
+    #SET(%Indentation,%Indentation+1)
+  #ENDIF
+#ENDFOR
+#LOOP
+  #IF(%Indentation < 0)
+    #BREAK
+  #ENDIF
+  #SET(%Indentation,%Indentation-1)
+  #SET(%ReportControlSourceLine,'END')
+%[22+(2*%Indentation)]Null %ReportControlSourceLine
+#ENDLOOP
+#EMBED(%DataSectionAfterReport,'Data Section, After Report Declaration'),DATA
+#!-------------------------------------------------------------------------
+#GROUP(%StandardWindowGeneration),AUTO
+#MESSAGE('Standard Window Generation',3)
+#DECLARE(%NewWindowStatement)
+#DECLARE(%CurrentOperationMode)
+#DECLARE(%MenuBarFound)
+#DECLARE(%ToolBarFound)
+#EMBED(%DataSectionBeforeWindow,'Data Section, Before Window Declaration')
+#IF(%WindowStatement)
+  #IF(SUB(%WindowStatement,1,11)='APPLICATION')
+    #SET(%NewWindowStatement,%WindowStatement)
+  #ELSIF(%WindowOperationMode='Use WINDOW setting')
+    #SET(%NewWindowStatement,%WindowStatement)
+  #ELSE
+    #SET(%CurrentOperationMode,SUB(%WindowStatement,LEN(%WindowStatement)-3,4))
+    #IF(%CurrentOperationMode = ',MDI')
+      #IF(%WindowOperationMode = 'MDI')
+        #SET(%NewWindowStatement,%WindowStatement)
+      #ELSE
+        #SET(%NewWindowStatement,SUB(%WindowStatement,1,LEN(%WindowStatement)-4))
+        #IF(%WindowOperationMode = 'MODAL')
+          #SET(%NewWindowStatement,%NewWindowStatement & ',MODAL')
+        #ENDIF
+      #ENDIF
+    #ELSIF(%CurrentOperationMode = 'ODAL')
+      #IF(%WindowOperationMode = 'MODAL')
+        #SET(%NewWindowStatement,%WindowStatement)
+      #ELSE
+        #SET(%NewWindowStatement,SUB(%WindowStatement,1,LEN(%WindowStatement)-6))
+        #IF(%WindowOperationMode = 'MDI')
+          #SET(%NewWindowStatement,%NewWindowStatement & ',MDI')
+        #ENDIF
+      #ENDIF
+    #ELSE
+      #SET(%NewWindowStatement,%WindowStatement)
+      #IF(%WindowOperationMode = 'MDI')
+        #SET(%NewWindowStatement,%NewWindowStatement & ',MDI')
+      #ELSIF(%WindowOperationMode = 'MODAL')
+        #SET(%NewWindowStatement,%NewWindowStatement & ',MODAL')
+      #ENDIF
+    #ENDIF
+  #ENDIF
+  #IF(EXTRACT(%WindowStatement,'ICON') AND NOT EXTRACT(%WindowStatement,'IMM'))
+    #SET(%NewWindowStatement,%NewWindowStatement & ',IMM')
+  #ELSIF(EXTRACT(%WindowStatement,'MAX') AND NOT EXTRACT(%WindowStatement,'IMM'))
+    #SET(%NewWindowStatement,%NewWindowStatement & ',IMM')
+  #ENDIF
+%[20]Window %NewWindowStatement
+  #DECLARE(%Indentation,LONG)
+  #DECLARE(%TestValue)
+  #SET(%Indentation,0)
+  #DECLARE(%ControlSourceLine)
+  #FOR(%Control),WHERE(%ControlMenu)
+    #IF(%ControlIndent<%Indentation)
+      #LOOP
+        #SET(%Indentation,%Indentation-1)
+%[22+(2*%Indentation)]Null END
+        #IF(%ControlIndent=%Indentation)
+          #BREAK
+        #ENDIF
+      #ENDLOOP
+    #ENDIF
+    #IF(%MenuBarStatement AND NOT %MenuBarFound)
+%[22+(2*%Indentation)]Null %MenuBarStatement
+      #SET(%MenuBarFound,%True)
+      #SET(%Indentation,%Indentation+1)
+    #ENDIF
+    #SET(%ControlSourceLine,%ControlStatement)
+%[22+(2*%Indentation)]Null %ControlSourceLine
+    #IF(SUB(%ControlSourceLine,1,4)='MENU')
+      #SET(%Indentation,%Indentation+1)
+    #ENDIF
+  #ENDFOR
+  #LOOP,WHILE(%Indentation)
+    #SET(%Indentation,%Indentation-1)
+%[22+(2*%Indentation)]Null END
+  #ENDLOOP
+  #FOR(%Control),WHERE(%ControlTool)
+    #IF(%ControlIndent<%Indentation)
+      #LOOP
+        #SET(%Indentation,%Indentation-1)
+%[22+(2*%Indentation)]Null END
+        #IF(%ControlIndent=%Indentation)
+          #BREAK
+        #ENDIF
+      #ENDLOOP
+    #ENDIF
+    #IF(%ToolBarStatement AND NOT %ToolBarFound)
+%[22+(2*%Indentation)]Null %ToolBarStatement
+      #SET(%ToolBarFound,%True)
+      #SET(%Indentation,%Indentation+1)
+    #ENDIF
+    #SET(%ControlSourceLine,%ControlStatement)
+    #IF(%MessageDescription)
+      #IF(%ControlType <> 'STRING')
+        #IF(NOT EXTRACT(%ControlStatement,'MSG'))
+          #FIND(%Field,%ControlUse)
+          #IF(%FieldDescription)
+            #SET(%ControlSourceLine,%ControlSourceLine & ',MSG(''' & %FieldDescription & ''')')
+          #ENDIF
+        #ENDIF
+      #ENDIF
+    #ENDIF
+%[22+(2*%Indentation)]Null %ControlSourceLine
+    #IF(SUB(%ControlSourceLine,1,6)='OPTION')
+      #SET(%Indentation,%Indentation+1)
+    #ELSIF(SUB(%ControlSourceLine,1,5)='GROUP')
+      #SET(%Indentation,%Indentation+1)
+    #ENDIF
+  #ENDFOR
+  #LOOP,WHILE(%Indentation)
+    #SET(%Indentation,%Indentation-1)
+%[22+(2*%Indentation)]Null END
+  #ENDLOOP
+  #FOR(%Control),WHERE(NOT %ControlMenu AND NOT %ControlTool)
+    #IF(%ControlIndent<%Indentation)
+      #LOOP
+        #SET(%Indentation,%Indentation-1)
+%[22+(2*%Indentation)]Null END
+        #IF(%ControlIndent=%Indentation)
+          #BREAK
+        #ENDIF
+      #ENDLOOP
+    #ENDIF
+    #SET(%ControlSourceLine,%ControlStatement)
+    #IF(%MessageDescription)
+      #IF(%ControlType <> 'STRING')
+        #IF(NOT EXTRACT(%ControlStatement,'MSG'))
+          #FIND(%Field,%ControlUse)
+          #IF(%FieldDescription)
+            #SET(%ControlSourceLine,%ControlSourceLine & ',MSG(''' & %FieldDescription & ''')')
+          #ENDIF
+        #ENDIF
+      #ENDIF
+    #ENDIF
+%[22+(2*%Indentation)]Null %ControlSourceLine
+    #IF(SUB(%ControlSourceLine,1,6)='OPTION')
+      #SET(%Indentation,%Indentation+1)
+    #ELSIF(SUB(%ControlSourceLine,1,5)='GROUP')
+      #SET(%Indentation,%Indentation+1)
+    #ELSE
+      #IF(NOT %FirstField)
+        #SET(%FirstField,%Control)
+      #ENDIF
+      #SET(%LastField,%Control)
+    #ENDIF
+  #ENDFOR
+  #LOOP,WHILE(%Indentation)
+    #SET(%Indentation,%Indentation-1)
+%[22+(2*%Indentation)]Null END
+  #ENDLOOP
+%[20]Null END
+#ENDIF
+#EMBED(%DataSectionAfterWindow,'Data Section, After Window Declaration')
+#!-------------------------------------------------------------------------
+#GROUP(%StandardProgressWindow)
+ProgressWindow       WINDOW('Progress...'),AT(,,142,59),CENTER,TIMER(1),GRAY,DOUBLE
+                       STRING(''),AT(0,3,141,10),USE(?Progress:UserString),CENTER
+                       BOX,AT(15,15,111,12),COLOR(00H),FILL(0FFFFFFH)
+                       BOX,AT(21,18,100,6),COLOR(00H),FILL(0C0C0C0H)
+                       BOX,AT(21,18,100,6),USE(?Progress:Thermometer),FILL(0FFH)
+                       STRING(''),AT(0,30,141,10),USE(?Progress:PctText),CENTER
+                       BUTTON('Cancel'),AT(45,42,50,15),USE(?Progress:Cancel)
+                     END
+#!-------------------------------------------------------------------------
+#GROUP(%StandardValueAssignment,%AssignTo,%AssignValue)
+#IF(%AssignValue)
+  #IF(SUB(%AssignValue,1,1)='!')
+    #SET(%ValueConstruct,SUB(%AssignValue,2,LEN(%AssignValue)-1))
+%AssignTo = %ValueConstruct
+  #ELSE
+%AssignTo = '%AssignValue'
+  #ENDIF
+#ENDIF
+#!-------------------------------------------------------------------------
+#GROUP(%StandardVBXSearch)
+#DECLARE(%VBXClassString)
+#IF(%Window)
+  #FOR(%Control),WHERE(%ControlType='CUSTOM')
+    #SET(%VBXClassString,EXTRACT(%ControlStatement,'CLASS'))
+    #SET(%VBXClassString,SUB(%VBXClassString,8,LEN(%VBXClassString)))
+    #SET(%VBXClassString,SUB(%VBXClassString,1,INSTRING(',',%VBXClassString,1,1)-2))
+    #ADD(%ModuleVBXUsed,%VBXClassString)
+  #ENDFOR
+#ENDIF
+#IF(%Report)
+  #FOR(%ReportControl),WHERE(%ReportControlType='CUSTOM')
+    #SET(%VBXClassString,EXTRACT(%ReportControlStatement,'CLASS'))
+    #SET(%VBXClassString,SUB(%VBXClassString,8,LEN(%VBXClassString)))
+    #SET(%VBXClassString,SUB(%VBXClassString,1,INSTRING(',',%VBXClassString,1,1)-2))
+    #ADD(%ModuleVBXUsed,%VBXClassString)
+  #ENDFOR
+#ENDIF

@@ -1,0 +1,133 @@
+#GROUP(%ConstructExportFile)
+#MESSAGE('Generating Module:    ' & %Application & '.EXP', 1) #! Post generation message
+#MESSAGE('Generating Export File', 2) #! Post generation message
+#MESSAGE('',3)
+#SET(%ExportFile,%Application & '.exp')
+#CREATE(%BuildFile)
+#IF(%UseDefaultXPManifest)
+MANIFEST
+#ENDIF
+#EMBED(%AfterCreatingExportFile,'Creating the export file')
+#!
+NAME %Application GUI
+#!
+#DECLARE(%ExpLineNumber,LONG)
+#SET(%ExpLineNumber,0)
+#IF(%ProgramExtension='DLL')
+#IF(%Target32 AND %RBDImageBase>'')
+#INSERT(%RebaseCode)
+#ENDIF
+#EMBED(%BeforeExportList,'Before the export list')
+EXPORTS
+  #EMBED(%BeginningExports,'Top of export list')
+  #FOR(%Procedure)
+    #IF(%ProcedureExported)
+      #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %(LINKNAME(%Procedure & %Prototype)) @%ExpLineNumber
+    #ENDIF
+  #ENDFOR
+  #FOR(%File)
+    #IF(%DefaultGenerate)
+    #ELSIF(%OverrideGenerate)
+    #ELSE
+      #FIX(%UsedFile,%File)
+      #IF(NOT %UsedFile)
+        #CYCLE
+      #ENDIF
+    #ENDIF
+    #IF(%OverrideExternal='Not External')
+      #IF(%OverrideExport)
+        #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $%File @%ExpLineNumber
+        #FOR(%Key)
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$%Key @%ExpLineNumber
+        #ENDFOR
+        #FOR(%Field),WHERE(%FieldType = 'MEMO')
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$%Field @%ExpLineNumber
+        #ENDFOR
+        #FOR(%Field),WHERE(%FieldType = 'BLOB')
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$%Field @%ExpLineNumber
+        #ENDFOR
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$%FilePrefix:RECORD @%ExpLineNumber
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$TYPE$%FilePrefix:RECORD @%ExpLineNumber
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $%File::Used @%ExpLineNumber
+      #ENDIF
+    #ELSIF((NOT %OverrideExternal) OR %OverrideExternal = 'Use Default')
+      #IF(%DefaultExport)
+        #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $%File @%ExpLineNumber
+        #FOR(%Key)
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$%Key @%ExpLineNumber
+        #ENDFOR
+        #FOR(%Field),WHERE(%FieldType = 'MEMO')
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$%Field @%ExpLineNumber
+        #ENDFOR
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$%FilePrefix:RECORD @%ExpLineNumber
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  %File$TYPE$%FilePrefix:RECORD @%ExpLineNumber
+          #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $%File::Used @%ExpLineNumber
+      #ENDIF
+    #ENDIF
+  #ENDFOR
+  #IF(NOT %GlobalExternal)
+    #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $GlobalRequest @%ExpLineNumber
+    #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $GlobalResponse @%ExpLineNumber
+    #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $VCRRequest @%ExpLineNumber
+    #SET(%ValueConstruct,1)
+    #FOR(%GlobalData)
+      #IF(NOT EXTRACT(%GlobalDataStatement,'EXTERNAL'))
+        #IF(%ValueConstruct = 1)
+          #IF(EXTRACT(%GlobalDataStatement,'GROUP'))
+            #SET(%ValueConstruct,%ValueConstruct + 1)
+              #IF(NOT EXTRACT(%GlobalDataStatement,'OVER'))
+                #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  TYPE$%GlobalData @%ExpLineNumber
+                #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $%GlobalData @%ExpLineNumber
+              #ENDIF
+          #ELSIF(EXTRACT(%GlobalDataStatement,'QUEUE'))
+            #SET(%ValueConstruct,%ValueConstruct + 1)
+              #IF(NOT EXTRACT(%GlobalDataStatement,'OVER'))
+                #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  TYPE$%GlobalData @%ExpLineNumber
+                #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  TCB$%GlobalData @%ExpLineNumber
+                #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $%GlobalData @%ExpLineNumber
+              #ENDIF
+          #ELSE
+            #IF(NOT EXTRACT(%GlobalDataStatement,'OVER'))
+              #SET(%ExpLineNumber,%ExpLineNumber + 1)
+  $%GlobalData @%ExpLineNumber
+            #ENDIF
+          #ENDIF
+        #ELSE
+          #IF(EXTRACT(%GlobalDataStatement,'GROUP'))
+            #SET(%ValueConstruct,%ValueConstruct + 1)
+          #ELSIF(EXTRACT(%GlobalDataStatement,'QUEUE'))
+            #SET(%ValueConstruct,%ValueConstruct + 1)
+          #ELSIF(NOT %GlobalData)
+            #SET(%ValueConstruct,%ValueConstruct - 1)
+          #ENDIF
+        #ENDIF
+      #ENDIF
+    #ENDFOR
+  #ENDIF
+#ENDIF
+#EMBED(%DLLExportList,'Inside the export list')
+#EMBED(%BeforeClosingExports,'Closing the export file')
+#CLOSE(%BuildFile)
+#REPLACE(%ExportFile,%BuildFile)

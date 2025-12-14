@@ -1,0 +1,126 @@
+#PROCEDURE(Window,'Generic Window Handler'),WINDOW,HLP('~TPLProcWindow')
+#LOCALDATA
+LocalRequest         LONG,AUTO
+OriginalRequest      LONG,AUTO
+LocalResponse        LONG,AUTO
+WindowOpened         LONG
+WindowInitialized    LONG
+ForceRefresh         LONG,AUTO
+#ENDLOCALDATA
+#CLASS('Procedure Setup','Upon Entry into the Procedure')
+#CLASS('Before Lookups','Refresh Window ROUTINE, before lookups')
+#CLASS('After Lookups','Refresh Window ROUTINE, after lookups')
+#CLASS('Procedure Exit','Before Leaving the Procedure')
+#PROMPT('&Parameters:',@s255),%Parameters
+#ENABLE(%ProcedureType='FUNCTION')
+  #PROMPT('Return Value:',FIELD),%ReturnValue
+#ENDENABLE
+#PROMPT('Window Operation Mode:',DROP('Use WINDOW setting|Normal|MDI|Modal')),%WindowOperationMode
+#ENABLE(%INIActive)
+  #BOXED('INI File Settings')
+    #PROMPT('Save and Restore Window Location',CHECK),%INISaveWindow,DEFAULT(1),AT(10,,150)
+  #ENDBOXED
+#ENDENABLE
+#INSERT(%StandardWindowCode)
+#!---------------------------------------------------------
+#GROUP(%StandardWindowCode)
+#INSERT(%StandardVBXSearch)
+#IF(NOT %Window)
+  #ERROR(%Procedure & ' Error: No Window Defined!')
+  #RETURN
+#ENDIF
+#DECLARE(%FirstField)
+#DECLARE(%LastField)
+#DECLARE(%ProgressWindowRequired)
+#INSERT(%FieldTemplateStandardButtonMenuPrompt)
+#INSERT(%FieldTemplateStandardEntryPrompt)
+#INSERT(%FieldTemplateStandardCheckBoxPrompt)
+#EMBED(%GatherSymbols,'Gather Template Symbols'),HIDE
+#INSERT(%FileControlInitialize)
+%Procedure %ProcedureType%Parameters
+
+#FOR(%LocalData)
+%[20]LocalData %LocalDataStatement
+#ENDFOR
+CurrentSelected  LONG,AUTO
+#INSERT(%StandardWindowGeneration)
+#IF(%ProgressWindowRequired)
+#INSERT(%StandardProgressWindow)
+#ENDIF
+  CODE
+  #EMBED(%ProcedureInitialize,'Initialize the Procedure')
+  LocalRequest = GlobalRequest
+  OriginalRequest = GlobalRequest
+  LocalResponse = RequestCancelled
+  ForceRefresh = False
+  CLEAR(GlobalRequest)
+  CLEAR(GlobalResponse)
+  #EMBED(%ProcedureSetup,'Procedure Setup')
+  #INSERT(%StandardFormula,'Procedure Setup')
+  #INSERT(%FileControlOpen)
+  #INSERT(%StandardWindowOpening)
+  #EMBED(%BeforeAccept,'Preparing to Process the Window')
+  #MESSAGE('Accept Handling',3)
+  ACCEPT
+    #EMBED(%AcceptLoopBeforeEventHandling,'Accept Loop, Before CASE EVENT() handling')
+    CASE EVENT()
+    #EMBED(%EventCaseBeforeGenerated,'CASE EVENT() structure, before generated code')
+    #INSERT(%StandardWindowHandling)
+    #EMBED(%EventCaseAfterGenerated,'CASE EVENT() structure, after generated code')
+    END
+    #EMBED(%AcceptLoopAfterEventHandling,'Accept Loop, After CASE EVENT() handling')
+    #EMBED(%AcceptLoopBeforeFieldHandling,'Accept Loop, Before CASE FIELD() handling')
+    #SUSPEND
+    #?CASE FIELD()
+    #EMBED(%FieldCaseBeforeGenerated,'CASE FIELD() structure, before generated code')
+    #INSERT(%StandardControlHandling)
+    #EMBED(%FieldCaseAfterGenerated,'CASE FIELD() structure, after generated code')
+    #?END
+    #RESUME
+    #EMBED(%AcceptLoopAfterFieldHandling,'Accept Loop, After CASE FIELD() handling')
+  END
+  DO ProcedureReturn
+!---------------------------------------------------------------------------
+ProcedureReturn ROUTINE
+  #INSERT(%FileControlClose)
+  #INSERT(%StandardWindowClosing)
+  #EMBED(%EndOfProcedure,'End of Procedure')
+  #INSERT(%StandardFormula,'Procedure Exit')
+  IF LocalResponse
+    GlobalResponse = LocalResponse
+  ELSE
+    GlobalResponse = RequestCancelled
+  END
+  #IF(%ProcedureType='FUNCTION')
+  RETURN(%ReturnValue)
+  #ELSE
+  RETURN
+  #ENDIF
+!---------------------------------------------------------------------------
+InitializeWindow ROUTINE
+  #EMBED(%WindowInitializationCode,'Window Initialization Code')
+  DO RefreshWindow
+!---------------------------------------------------------------------------
+RefreshWindow ROUTINE
+  CurrentSelected = SELECTED()
+  #EMBED(%RefreshWindowBeforeLookup,'Refresh Window routine, before lookups')
+  #INSERT(%StandardFormula,'Before Lookups')
+  #INSERT(%StandardSecondaryLookups)
+  #INSERT(%StandardFormula,'After Lookups')
+  #EMBED(%RefreshWindowAfterLookup,'Refresh Window routine, after lookups')
+  #EMBED(%RefreshWindowBeforeDisplay,'Refresh Window routine, before DISPLAY()')
+  DISPLAY()
+  ForceRefresh = False
+  IF SELECTED() <> CurrentSelected
+    SELECT(CurrentSelected)
+  END
+!---------------------------------------------------------------------------
+SyncWindow ROUTINE
+  #EMBED(%SyncWindowBeforeLookup,'Sync Record routine, before lookups')
+  #INSERT(%StandardFormula,'Before Lookups')
+  #INSERT(%StandardSecondaryLookups)
+  #INSERT(%StandardFormula,'After Lookups')
+  #EMBED(%SyncWindowAfterLookup,'Sync Record routine, after lookups')
+!---------------------------------------------------------------------------
+#EMBED(%ProcedureRoutines,'Procedure Routines')
+#INSERT(%FileControlUpdate)

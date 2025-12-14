@@ -1,0 +1,11 @@
+DefaultPopups GROUP
+Number     USHORT(4)
+           PSTRING('Insert')        !1
+           PSTRING('&Insert')
+           PSTRING('Change')        !2
+           PSTRING('&Change')
+           PSTRING('Delete')        !3
+           PSTRING('&Delete')
+           PSTRING('Select')        !4
+           PSTRING('&Select')
+         END

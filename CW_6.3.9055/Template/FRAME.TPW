@@ -1,0 +1,153 @@
+#PROCEDURE(Frame,'Multiple Document Main Menu'),WINDOW,REPORT,HLP('~TPLProcFrame')
+#LOCALDATA
+LocalRequest         LONG
+OriginalRequest      LONG
+LocalResponse        LONG
+FilesOpened          LONG
+WindowOpened         LONG
+WindowInitialized    LONG
+ForceRefresh         LONG
+CurrentTab           STRING(80)
+#ENDLOCALDATA
+#CLASS('Procedure Setup','Upon Entry into the Procedure')
+#CLASS('Before Lookups','Refresh Window ROUTINE, before lookups')
+#CLASS('After Lookups','Refresh Window ROUTINE, after lookups')
+#CLASS('Procedure Exit','Before Leaving the Procedure')
+#PROMPT('P&arameters:',@s255),%Parameters #! Retrieve parameters used
+#ENABLE(%ProcedureType='FUNCTION')
+  #PROMPT('&Return Value:',FIELD),%ReturnValue
+#ENDENABLE
+#INSERT(%StandardWindowPrompts)
+#PROMPT('&Splash Procedure:',PROCEDURE),%SplashProcedure
+#AT(%DataSectionBeforeWindow)
+  #IF(%SplashProcedure)
+SplashProcedureThread LONG
+  #ENDIF
+#ENDAT
+#AT(%CustomGlobalDeclarations)
+  #INSERT(%StandardGlobalSetup)
+#ENDAT
+#AT(%WindowEventHandling,'OpenWindow')
+  #IF(%SplashProcedure)
+SplashProcedureThread = START(%SplashProcedure)
+  #ENDIF
+#ENDAT
+#AT(%WindowOtherEventHandling)
+  #IF(%SplashProcedure)
+IF SplashProcedureThread
+  IF EVENT() = Event:Accepted
+    POST(Event:CloseWindow,,SplashProcedureThread)
+    SplashPRocedureThread = 0
+  END
+END
+  #ENDIF
+#ENDAT
+#INSERT(%StandardWindowCode)
+#AT(%AfterWindowOpening),PRIORITY(7500)
+#INSERT(%ExtendedFrameUI)
+#ENDAT
+#!-----------------------------------------
+#DEFAULT
+NAME DefaultFrame
+[COMMON]
+DESCRIPTION 'Default MDI Frame'
+FROM Clarion Frame
+[PROMPTS]
+%INISaveWindow LONG  (1)
+%ButtonAction DEPEND %Control STRING TIMES 1
+WHEN  ('?Exit') ('No Special Action')
+
+%MenuAction DEPEND %Control STRING TIMES 1
+WHEN  ('?Exit') ('No Special Action')
+
+[ADDITION]
+NAME Clarion DateTimeDisplay
+[INSTANCE]
+INSTANCE 1
+PROCPROP
+[PROMPTS]
+%DisplayDate LONG  (0)
+%DatePicture STRING  ('October 31, 1959')
+%OtherDatePicture @S20  ('')
+%ShowDayOfWeek LONG  (1)
+%DateDisplayLocation STRING  ('Status Bar')
+%DateStatusSection @n1  (3)
+%DateControl STRING  ('')
+%DisplayTime LONG  (0)
+%TimePicture STRING  ('5:30PM')
+%OtherTimePicture @S20  ('')
+%TimeDisplayLocation STRING  ('Status Bar')
+%TimeStatusSection @n1  (4)
+%TimeControl STRING  ('')
+[WINDOW]
+AppFrame APPLICATION('Application'),AT(,,310,190),STATUS(-1,80,120,45),SYSTEM,MAXIMIZE,RESIZE
+       MENUBAR
+         MENU('&File'),USE(?FileMenu)
+           ITEM('P&rint Setup...'),USE(?PrintSetup),MSG('Setup Printer'),STD(STD:PrintSetup)
+           ITEM,SEPARATOR
+           ITEM('E&xit'),USE(?Exit),MSG('Exit this application'),STD(STD:Close)
+         END
+         MENU('&Edit'),USE(?EditMenu)
+           ITEM('Cu&t'),USE(?Cut),MSG('Cut Selection To Clipboard'),STD(STD:Cut)
+           ITEM('&Copy'),USE(?Copy),MSG('Copy Selection To Clipboard'),STD(STD:Copy)
+           ITEM('&Paste'),USE(?Paste),MSG('Paste From Clipboard'),STD(STD:Paste)
+         END
+         MENU('&Window'),MSG('Arrange multiple open windows'),STD(STD:WindowList)
+           ITEM('T&ile'),USE(?Tile),MSG('Arrange multiple opened windows'),STD(STD:TileWindow)
+           ITEM('&Cascade'),USE(?Cascade),MSG('Arrange multiple opened windows'),STD(STD:CascadeWindow)
+           ITEM('&Arrange Icons'),USE(?Arrange),MSG('Arrange the icons for minimized windows'),STD(STD:ArrangeIcons)
+         END
+         MENU('&Help'),MSG('Windows Help')
+           ITEM('&Contents'),USE(?Helpindex),MSG('View the contents of the help file'),STD(STD:HelpIndex)
+           ITEM('&Search for Help On...'),USE(?HelpSearch),MSG('Search for help on a subject'),STD(STD:HelpSearch)
+           ITEM('&How to Use Help'),USE(?HelpOnHelp),MSG('Provides general instructions on using help'),STD(STD:HelpOnHelp)
+         END
+       END
+     END
+
+#ENDDEFAULT
+#!
+#!
+#GROUP(%ExtendedUISetXPMenuColor)
+  #CASE(%ExtUIXPMenuColorType)
+  #OF('Office2k')
+    #SET(%ExtUIXPMenuColorLeft,'8421504')
+    #SET(%ExtUIXPMenuColorRight,'8421504')
+  #OF('Window2K')
+    #SET(%ExtUIXPMenuColorLeft,'12632256')
+    #SET(%ExtUIXPMenuColorRight,'12632256')
+  #OF('XPLunaBlue')
+    #SET(%ExtUIXPMenuColorLeft,'16706781')
+    #SET(%ExtUIXPMenuColorRight,'14854529')
+  #OF('XPLunaGreen')
+    #SET(%ExtUIXPMenuColorLeft,'14612468')
+    #SET(%ExtUIXPMenuColorRight,'9553591')
+  #OF('XPLunaSilver')
+    #SET(%ExtUIXPMenuColorLeft,'15920364')
+    #SET(%ExtUIXPMenuColorRight,'12560039')
+  #ENDCASE
+#!
+#GROUP(%ExtendedFrameUI)
+#SUSPEND
+#?COMPILE ('**CW7**',_CWVER_=7000)
+#IF(%ExtUIXPMenuEnable)
+    %Window{PROP:XPMenuGradient, XPMenuGradient:LeftColor}  = %ExtUIXPMenuColorLeft
+    %Window{PROP:XPMenuGradient, XPMenuGradient:RightColor} = %ExtUIXPMenuColorRight
+#ENDIF
+#CASE(%ExtUIMDITab)
+#OF('DISABLE')
+    %Window{PROP:TabBarVisible}  = False
+#OF('TOP')
+    %Window{PROP:TabBarLocation} = MDITabLocation:Top
+#OF('BOTTOM')
+    %Window{PROP:TabBarLocation} = MDITabLocation:Bottom
+#ENDCASE
+#IF(%ExtUIMDITab<>'DISABLE')
+    %Window{PROP:TabBarStyle} = TabStyle:%ExtUIMDITabStyle
+    %Window{PROP:TabBarVisible}  = True
+#ENDIF
+#?!**CW7**
+#RESUME
+#!
+#!
+#!
